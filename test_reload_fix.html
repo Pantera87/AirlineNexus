@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Page Reload Fix</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .test-section {
+            background-color: #f5f5f5;
+            border: 1px solid #ddd;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .warning {
+            color: #d32f2f;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Page Reload Test</h1>
+
+    <div class="test-section">
+        <h2>Test Instructions:</h2>
+        <ol>
+            <li>Open the application in a browser (http://localhost:3002)</li>
+            <li>Navigate to different screens (Dashboard, Fleet, Routes, etc.)</li>
+            <li>Refresh the page using F5 or Ctrl+R</li>
+            <li>Check if you're returned to the same screen you were on before refresh</li>
+        </ol>
+    </div>
+
+    <div class="test-section">
+        <h2>Expected Behavior:</h2>
+        <p>After the fix, when you reload the page, you should be taken back to the screen you were previously viewing (e.g., if you were on the Fleet screen, after refresh you should still see the Fleet screen).</p>
+
+        <p class="warning">Before the fix: You would always return to the Welcome screen or Dashboard.</p>
+    </div>
+
+    <div class="test-section">
+        <h2>Technical Details:</h2>
+        <p>The issue was caused by the Zustand store's persist middleware not including the 'currentScreen' property in the persisted state. This meant that on page reload, currentScreen would default to 'welcome' instead of maintaining the user's previous location.</p>
+
+        <p><strong>Fix applied:</strong> Added <code>currentScreen: state.currentScreen</code> to the partialize function in gameStore.ts (line 352).</p>
+    </div>
+
+    <button onclick="window.open('http://localhost:3002', '_blank')">Open Application</button>
+</body>
+</html>

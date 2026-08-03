@@ -33,7 +33,7 @@ export function TopBar() {
           <span className="text-sm font-medium">
             {currentDate && currentDate instanceof Date && !isNaN(currentDate.getTime())
               ? formatShortDate(currentDate)
-              : 'Invalid Date'}
+              : 'Loading...'}
           </span>
         </div>
 

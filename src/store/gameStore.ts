@@ -15,6 +15,7 @@ import type {
 } from '@/types/game';
 import { AIRCRAFT_DATABASE } from '@data/aircraft';
 import { generateId } from '@utils/helpers';
+import { DatabaseInitializer } from '@/database/init';
 
 // Default world state
 const defaultWorldState: WorldState = {
@@ -349,6 +350,7 @@ export const useGameStore = create<GameStore>()(
       partialize: (state) => ({
         airline: state.airline,
         currentDate: state.currentDate,
+        currentScreen: state.currentScreen,
         settings: state.settings,
         world: state.world,
       }),
