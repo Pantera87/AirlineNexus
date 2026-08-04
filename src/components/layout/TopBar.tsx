@@ -6,7 +6,8 @@ import {
   Bell,
   Calendar,
 } from 'lucide-react';
-import { formatShortDate, formatCurrency } from '@utils/helpers';
+import { formatCurrency } from '@utils/helpers';
+import { GameTimeEngine } from '@utils/gameTimeEngine';
 
 export function TopBar() {
   const currentDate = useGameStore((state) => state.currentDate);
@@ -16,6 +17,11 @@ export function TopBar() {
   const airline = useGameStore((state) => state.airline);
   const notifications = useGameStore((state) => state.notifications);
   const unreadCount = notifications.filter((n) => !n.isRead).length;
+
+  // Use GameTimeEngine to display date and time
+  const safeCurrentDate = currentDate && currentDate instanceof Date ? currentDate : new Date();
+  const gameTimeEngine = new GameTimeEngine(safeCurrentDate);
+  const displayDateTime = gameTimeEngine.getDisplayDateTime();
 
   const speedButtons = [
     { label: 'Paused', speed: 'paused' as const, icon: Pause },
@@ -31,9 +37,7 @@ export function TopBar() {
         <div className="flex items-center gap-2 text-runway-300">
           <Calendar className="w-4 h-4" />
           <span className="text-sm font-medium">
-            {currentDate && currentDate instanceof Date && !isNaN(currentDate.getTime())
-              ? formatShortDate(currentDate)
-              : 'Loading...'}
+            {displayDateTime}
           </span>
         </div>
 

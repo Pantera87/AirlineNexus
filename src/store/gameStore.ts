@@ -16,6 +16,8 @@ import type {
 import { AIRCRAFT_DATABASE } from '@data/aircraft';
 import { generateId } from '@utils/helpers';
 import { DatabaseInitializer } from '@/database/init';
+import { GameTimeEngine } from '@/utils/gameTimeEngine';
+import { GameTimeRepository } from '@/database/repositories/gameTime.repository';
 
 // Default world state
 const defaultWorldState: WorldState = {
@@ -90,8 +92,9 @@ interface GameStore extends GameState {
   setDifficulty: (difficulty: Difficulty) => void;
 
   // Date/time management
-  advanceDate: (days: number) => void;
-  setCurrentDate: (date: Date) => void;
+  advanceDate: (hours: number) => Promise<void>;
+  setCurrentDate: (date: Date) => Promise<void>;
+  getCurrentDate: () => Date;
 
   // Notifications
   addNotification: (notification: Omit<Notification, 'id' | 'timestamp' | 'isRead'>) => void;
@@ -111,7 +114,7 @@ interface GameStore extends GameState {
   createRoute: (origin: string, destination: string) => boolean;
 
   // Reset
-  resetGame: () => void;
+  resetGame: () => Promise<void>;
 }
 
 export const useGameStore = create<GameStore>()(
@@ -198,25 +201,47 @@ export const useGameStore = create<GameStore>()(
         set({ difficulty });
       },
 
-      // Date/time management
-      advanceDate: (days: number) => {
-        const currentDate = new Date(get().currentDate);
-        // Validate that currentDate is a valid Date object
-        if (!currentDate || !(currentDate instanceof Date) || isNaN(currentDate.getTime())) {
-          console.error('Invalid currentDate in advanceDate:', currentDate);
-          return;
-        }
-        currentDate.setDate(currentDate.getDate() + days);
-        set({ currentDate });
-      },
+       // Date/time management
+        advanceDate: async (hours: number) => {
+          try {
+            const gameTimeEngine = await GameTimeEngine.initializeFromDatabase();
+            // For backward compatibility, we still need to handle the hours parameter
+            // but for our new implementation, we'll use the speed-based advancement
+            if (get().gameSpeed === 'paused') return;
+            
+            // For normal, fast, and fastest speeds, advance by 1 unit based on speed
+            gameTimeEngine.advanceTimeBySpeed(get().gameSpeed);
+            const newDate = await gameTimeEngine.saveAndGetCurrentDate();
+            set({ currentDate: newDate });
+          } catch (error) {
+            console.error('Failed to advance date:', error);
+            // Fallback to local advancement
+            const gameTimeEngine = new GameTimeEngine(get().currentDate);
+            // For backward compatibility, we still pass hours but it won't be used in our new method
+            gameTimeEngine.advanceTimeBySpeed(get().gameSpeed);
+            set({ currentDate: gameTimeEngine.getCurrentDate() });
+          }
+        },
 
-      setCurrentDate: (date: Date) => {
+      setCurrentDate: async (date: Date) => {
         // Validate that the date is a valid Date object
         if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
           console.error('Invalid date passed to setCurrentDate:', date);
           return;
         }
-        set({ currentDate: date });
+
+        try {
+          // Save to database
+          await GameTimeRepository.setCurrentDate(date);
+          set({ currentDate: date });
+        } catch (error) {
+          console.error('Failed to save date to database, using local storage only:', error);
+          set({ currentDate: date });
+        }
+      },
+
+      getCurrentDate: () => {
+        return new Date(get().currentDate);
       },
 
       // Notifications
@@ -336,7 +361,14 @@ export const useGameStore = create<GameStore>()(
       },
 
       // Reset
-      resetGame: () => {
+      resetGame: async () => {
+        try {
+          // Clear game time from database when resetting
+          await GameTimeRepository.delete(1);
+        } catch (error) {
+          console.error('Failed to clear game time from database:', error);
+        }
+
         set({
           ...initialState,
           currentScreen: 'welcome',

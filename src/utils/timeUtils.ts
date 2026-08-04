@@ -1,3 +1,5 @@
+import { GameTimeEngine } from './gameTimeEngine';
+
 /**
  * Format date for display in the UI
  * @param date - The date to format
@@ -43,4 +45,24 @@ export function formatDisplayDateTime(date: Date): string {
   }
   
   return `${formatDisplayDate(date)} ${formatDisplayTime(date)}`;
+}
+
+/**
+ * Format date and time using GameTimeEngine for game-specific display
+ * @param currentDate - The current game date
+ * @returns Formatted date and time string with hour (e.g., "Aug 2, 2026 14:00")
+ */
+export function formatGameDateTime(currentDate: Date): string {
+  const gameTimeEngine = new GameTimeEngine(currentDate);
+  return gameTimeEngine.getDisplayDateTime();
+}
+
+/**
+ * Format just the hour for game-specific display
+ * @param currentDate - The current game date
+ * @returns Formatted hour string (e.g., "14:00")
+ */
+export function formatGameHour(currentDate: Date): string {
+  const gameTimeEngine = new GameTimeEngine(currentDate);
+  return gameTimeEngine.getDisplayHour();
 }
