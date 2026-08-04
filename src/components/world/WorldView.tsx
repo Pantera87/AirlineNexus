@@ -59,12 +59,26 @@ function getSunOrbitAngle(date: Date): number {
   return ((hours - 12) / 24) * 2 * Math.PI
 }
 
-// Calculate sun's 3D position based on game time
+// Calculate the solar declination for a given day of year.
+// This is the angle between the sun direction and Earth's equatorial plane.
+// At summer solstice (day ~172): +23.44° (sun above equator)
+// At winter solstice (day ~355/0): -23.44° (sun below equator)
+function getSolarDeclination(dayOfYear: number): number {
+  return AXIAL_TILT_BASE * Math.sin((2 * Math.PI * (dayOfYear - 80)) / 365)
+}
+
+// Calculate sun's 3D position based on game time.
+// The Y component varies seasonally via solar declination so the real angle between sun and Earth is preserved.
 function getSunPosition(date: Date): [number, number, number] {
   const angle = getSunOrbitAngle(date)
+  const dayOfYear = getDayOfYear(date)
+  const declination = getSolarDeclination(dayOfYear)
+
   const x = SUN_DISTANCE * Math.cos(angle)
+  const y = SUN_DISTANCE * Math.sin(declination)
   const z = SUN_DISTANCE * Math.sin(angle)
-  return [x, 0, z]
+
+  return [x, y, z]
 }
 
 // Sun component with bloom-like glow that orbits around Earth based on game time
@@ -103,13 +117,19 @@ function Sun({ lightRef }: { lightRef: React.RefObject<DirectionalLight | null> 
     const orbitSpeed = (2 * Math.PI) / 86400
     accumulatedAngleRef.current += orbitSpeed * speedMultiplier * delta
 
+    // Include seasonal solar declination so sun is above/below the equator depending on time of year.
+    const dayOfYear = getDayOfYear(currentDate)
+    const declination = getSolarDeclination(dayOfYear)
+
     const x = SUN_DISTANCE * Math.cos(accumulatedAngleRef.current)
+    const y = SUN_DISTANCE * Math.sin(declination)
     const z = SUN_DISTANCE * Math.sin(accumulatedAngleRef.current)
-    groupRef.current.position.set(x, 0, z)
+
+    groupRef.current.position.set(x, y, z)
 
     // Sync directional light position with sun
     if (lightRef.current) {
-      lightRef.current.position.set(x, 0, z)
+      lightRef.current.position.set(x, y, z)
     }
   })
   
@@ -216,10 +236,16 @@ function Earth() {
     const sunAngleSpeed = (2 * Math.PI) / 86400
     accumulatedSunAngleRef.current += sunAngleSpeed * speedMultiplier * delta
     
+    // Update shader sun direction with seasonal declination so day/night terminator matches real Earth.
     {
+      const dayOfYear = getDayOfYear(currentDate)
+      const declination = getSolarDeclination(dayOfYear)
+
       const x = SUN_DISTANCE * Math.cos(accumulatedSunAngleRef.current)
+      const y = SUN_DISTANCE * Math.sin(declination)
       const z = SUN_DISTANCE * Math.sin(accumulatedSunAngleRef.current)
-      shaderMaterial.uniforms.uSunDirection.value.set(x, 0, z).normalize()
+
+      shaderMaterial.uniforms.uSunDirection.value.set(x, y, z).normalize()
     }
 
     // Update time uniform
@@ -337,7 +363,7 @@ const WorldView = () => {
   
   return (
     <div className="w-full h-full bg-black overflow-hidden rounded-lg border border-slate-800">
-      <Canvas camera={{ position: [0, 30, 50], fov: 45 }}>
+      <Canvas camera={{ position: [0, 40, 90], fov: 45 }}>
         {/* Starry galaxy background */}
         <Stars radius={200} depth={150} count={15000} factor={6} />
         
