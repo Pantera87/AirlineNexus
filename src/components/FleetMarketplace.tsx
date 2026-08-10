@@ -12,14 +12,14 @@ export default function FleetMarketplace() {
   const navigateTo = useGameStore((state) => state.navigateTo);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 relative overflow-hidden">
+    <div className="h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 relative flex flex-col">
       {/* Background pattern - aircraft silhouette overlay */}
       <div className="absolute inset-0 opacity-5 pointer-events-none">
         <div className="w-full h-full bg-[radial-gradient(circle_at_center,_rgba(148,163,255,0.1)_0%,_transparent_70%)]" />
       </div>
 
       {/* Main content */}
-      <div className="relative z-10">
+      <div className="relative z-10 flex flex-col h-full overflow-hidden">
         {/* Back button */}
         <button
           onClick={() => navigateTo('fleet')}
@@ -30,16 +30,16 @@ export default function FleetMarketplace() {
         </button>
 
         {/* Header */}
-        <header className="text-center py-12 px-4">
-          <h1 className="text-5xl font-bold text-white mb-4">Fleet Marketplace</h1>
-          <p className="text-xl text-blue-300 max-w-2xl mx-auto">
+        <header className="text-center py-6 px-4 shrink-0">
+          <h1 className="text-3xl font-bold text-white mb-2">Fleet Marketplace</h1>
+          <p className="text-sm text-blue-300 max-w-2xl mx-auto">
             {activeTab === 'new'
               ? 'Purchase brand new aircraft from leading manufacturers'
               : 'Explore pre-owned aircraft with competitive pricing'}
           </p>
 
           {/* Tab navigation */}
-          <div className="mt-8 flex justify-center gap-4">
+          <div className="mt-4 flex justify-center gap-3">
             <button
               onClick={() => switchTab('new')}
               className={`glass-tab ${activeTab === 'new' ? 'active' : ''}`}
@@ -63,8 +63,8 @@ export default function FleetMarketplace() {
         </header>
 
         {/* Main content area */}
-        <div className="px-4 pb-12">
-          <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-4 gap-8">
+        <div className="flex-1 px-4 pb-6 overflow-hidden flex flex-col">
+          <div className="max-w-7xl mx-auto h-full grid grid-cols-1 lg:grid-cols-4 gap-6">
             {/* Filter sidebar - hidden on mobile, toggleable on desktop */}
             <div className={`lg:block ${isFiltersOpen ? 'block' : 'hidden'} lg:col-span-1`}>
               <FilterSidebar
@@ -74,7 +74,7 @@ export default function FleetMarketplace() {
             </div>
 
             {/* Aircraft grid - takes full width on mobile, 3 cols on desktop */}
-            <div className="lg:col-span-3">
+            <div className="lg:col-span-3 flex flex-col h-full overflow-hidden">
               <AircraftGrid activeTab={activeTab} />
 
               {/* Filters toggle button for mobile */}
