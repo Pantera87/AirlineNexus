@@ -1,4 +1,4 @@
-﻿import { ReactNode } from 'react';
+import { ReactNode } from 'react';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { useGameStore } from '@store/gameStore';
@@ -20,10 +20,10 @@ export function Layout({ children }: LayoutProps) {
       <Sidebar />
 
       {/* Main Content Area */}
-      <main className="flex-1 flex flex-col relative overflow-hidden">
+      <main className="flex-1 flex flex-col relative">
         <TopBar />
 
-        <div className="flex-1 relative overflow-hidden">
+        <div className="flex-1 relative overflow-auto">
           <AnimatePresence mode="wait">
             <motion.div
               key={currentScreen}

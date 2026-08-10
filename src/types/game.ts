@@ -99,26 +99,28 @@ export interface AircraftListing {
   id: string;                      // Unique marketplace listing ID
   aircraftTypeId: string;          // Links to AIRCRAFT_DATABASE entry
   isNew: boolean;                  // true = Buy New tab, false = Used Fleet tab
-  
+
   // Price & Financing
   price: number;                   // Display price (MSRP for new, calculated for used)
-  
+
   // Condition (used only)
   condition?: ConditionGrade;      // Not applicable for new aircraft
   manufactureYear?: number;        // Actual year this unit was built
   totalFlightHours?: number;       // Accumulated hours since first flight
-  
+
   // Accessories (Phase 2 ready)
   includedAccessories: Accessory[];
-  
+
   // Marketplace metadata
   sellerName?: string;             // For used: airline name or "Aircraft Broker"
   listingDate?: Date;              // When this appeared on the market
   expiresAt?: Date | null;         // null = permanent (new), date = used listing expiry
-  
+
   // Purchase state
   purchased: boolean;              // Prevents double-buying active listings
 }
+
+export type GameDate = Date;
 
 export interface AircraftPurchase {
   type: PurchaseType;

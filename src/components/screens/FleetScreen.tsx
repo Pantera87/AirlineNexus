@@ -19,6 +19,7 @@ export function FleetScreen() {
   const airline = useGameStore((state) => state.airline);
   const addNotification = useGameStore((state) => state.addNotification);
   const purchaseAircraft = useGameStore((state) => state.purchaseAircraft);
+  const navigateTo = useGameStore((state) => state.navigateTo);
   const currencyFormat = useGameStore((state) => state.settings.currencyFormat);
   const [activeCategory, setActiveCategory] = useState<AircraftCategory | 'all'>('all');
   const [showMarketplace, setShowMarketplace] = useState(false);
@@ -65,62 +66,101 @@ export function FleetScreen() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Fleet Management</h1>
-          <p className="text-sm text-runway-400">{airline.fleet.length} aircraft in fleet</p>
+          <p className="text-sm text-runway-400">
+            {airline.fleet.filter((aircraft) => {
+              const type = AIRCRAFT_DATABASE.find((a) => a.id === aircraft.typeId);
+              return activeCategory === 'all' || type?.category === activeCategory;
+            }).length} aircraft in fleet
+          </p>
         </div>
-        <button onClick={() => setShowMarketplace(true)} className="btn-primary flex items-center gap-2">
-          <Plus className="w-4 h-4" />
-          Acquire Aircraft
-        </button>
-      </div>
-
-      {airline.fleet.length === 0 ? (
-        <div className="glass-panel p-12 flex flex-col items-center justify-center text-center">
-          <Plane className="w-12 h-12 text-runway-500 mb-4" />
-          <h2 className="text-lg font-semibold text-white mb-2">Your fleet is empty</h2>
-          <p className="text-sm text-runway-400 mb-4">Start building your airline by acquiring your first aircraft.</p>
-          <button onClick={() => setShowMarketplace(true)} className="btn-primary flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <button onClick={() => navigateTo('fleet-marketplace')} className="btn-primary flex items-center gap-2">
             <Plus className="w-4 h-4" />
-            Browse Aircraft Market
+            Visit Marketplace
+          </button>
+          <button onClick={() => setShowMarketplace(true)} className="btn-secondary flex items-center gap-2">
+            <Plane className="w-4 h-4" />
+            Quick Purchase
           </button>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {airline.fleet.map((aircraft) => {
-            const type = AIRCRAFT_DATABASE.find((a) => a.id === aircraft.typeId);
-            return (
-              <div key={aircraft.id} className="glass-panel p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-sky-500/10 flex items-center justify-center">
-                      <Plane className="w-5 h-5 text-sky-400" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-white">{type?.name || 'Unknown'}</p>
-                      <p className="text-xs text-runway-400">{aircraft.registration}</p>
-                    </div>
-                  </div>
-                  <span className={`badge ${aircraft.status === 'available' ? 'badge-success' : 'badge-warning'}`}>
-                    {aircraft.status}
-                  </span>
-                </div>
-                <div className="grid grid-cols-3 gap-2 text-center">
-                  <div>
-                    <p className="text-xs text-runway-500">Age</p>
-                    <p className="text-sm font-medium text-white">{aircraft.age}y</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-runway-500">Condition</p>
-                    <p className="text-sm font-medium text-white">{aircraft.condition}%</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-runway-500">Hours</p>
-                    <p className="text-sm font-medium text-white">{aircraft.totalFlightHours}</p>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+      </div>
+
+      <div className="flex gap-2 overflow-x-auto pb-2">
+        {categories.map((cat) => (
+          <button
+            key={cat.id}
+            onClick={() => setActiveCategory(cat.id)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
+              activeCategory === cat.id
+                ? 'bg-sky-500/20 text-sky-400'
+                : 'text-runway-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            {cat.label}
+          </button>
+        ))}
+      </div>
+
+        {airline.fleet.length === 0 ? (
+          <div className="glass-panel p-12 flex flex-col items-center justify-center text-center">
+            <Plane className="w-12 h-12 text-runway-500 mb-4" />
+            <h2 className="text-lg font-semibold text-white mb-2">Your fleet is empty</h2>
+        <p className="text-sm text-runway-400 mb-4">Start building your airline by acquiring your first aircraft.</p>
+        <div className="flex items-center gap-3">
+          <button onClick={() => navigateTo('fleet-marketplace')} className="btn-primary flex items-center gap-2">
+            <Plus className="w-4 h-4" />
+            Visit Marketplace
+          </button>
+          <button onClick={() => setShowMarketplace(true)} className="btn-secondary flex items-center gap-2">
+            <Plane className="w-4 h-4" />
+            Quick Purchase
+          </button>
         </div>
+        </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {airline.fleet
+              .filter((aircraft) => {
+                const type = AIRCRAFT_DATABASE.find((a) => a.id === aircraft.typeId);
+                if (!type) return false;
+                return activeCategory === 'all' || type.category === activeCategory;
+              })
+              .map((aircraft) => {
+                const type = AIRCRAFT_DATABASE.find((a) => a.id === aircraft.typeId);
+                return (
+                  <div key={aircraft.id} className="glass-panel p-5">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-sky-500/10 flex items-center justify-center">
+                          <Plane className="w-5 h-5 text-sky-400" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-white">{type?.name || 'Unknown'}</p>
+                          <p className="text-xs text-runway-400">{aircraft.registration}</p>
+                        </div>
+                      </div>
+                      <span className={`badge ${aircraft.status === 'available' ? 'badge-success' : 'badge-warning'}`}>
+                        {aircraft.status}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div>
+                        <p className="text-xs text-runway-500">Age</p>
+                        <p className="text-sm font-medium text-white">{aircraft.age}y</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-runway-500">Condition</p>
+                        <p className="text-sm font-medium text-white">{aircraft.condition}%</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-runway-500">Hours</p>
+                        <p className="text-sm font-medium text-white">{aircraft.totalFlightHours}</p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
       )}
 
       <AnimatePresence>

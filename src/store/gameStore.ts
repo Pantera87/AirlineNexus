@@ -82,8 +82,8 @@ const initialState: GameState = {
 // Game store interface
 interface GameStore extends GameState {
   // Navigation
-  currentScreen: Screen;
-  navigateTo: (screen: Screen) => void;
+  currentScreen: Screen | 'fleet-marketplace';
+  navigateTo: (screen: Screen | 'fleet-marketplace') => void;
 
   // Game control
   startGame: (airlineData: Partial<Airline>) => void;
@@ -125,7 +125,7 @@ export const useGameStore = create<GameStore>()(
       currentScreen: 'welcome',
 
       // Navigation
-      navigateTo: (screen: Screen) => {
+      navigateTo: (screen: Screen | 'fleet-marketplace') => {
         set({ currentScreen: screen });
       },
 
@@ -371,7 +371,7 @@ export const useGameStore = create<GameStore>()(
 
         set({
           ...initialState,
-          currentScreen: 'welcome',
+          currentScreen: 'welcome' as const,
           settings: get().settings, // Preserve settings
         });
       },

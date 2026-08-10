@@ -9,6 +9,7 @@ import { RoutesScreen } from '@components/screens/RoutesScreen';
 import { FinancesScreen } from '@components/screens/FinancesScreen';
 import { SettingsScreen } from '@components/screens/SettingsScreen';
 import { WorldView } from '@components/world/WorldView';
+import FleetMarketplace from './components/FleetMarketplace';
 
 function App() {
   try {
@@ -50,14 +51,16 @@ function App() {
   );
 }
 
-      return (
-        <Layout>
-          {currentScreen === 'dashboard' && <DashboardScreen />}
-          {currentScreen === 'fleet' && <FleetScreen />}
-          {currentScreen === 'routes' && <RoutesScreen />}
-          {currentScreen === 'finances' && <FinancesScreen />}
-          {currentScreen === 'settings' && <SettingsScreen />}
-          {currentScreen === 'world' && <WorldView />}
+        return (
+          <Layout>
+            {currentScreen === 'dashboard' && <DashboardScreen />}
+            {currentScreen === 'fleet' && <FleetScreen />}
+            {currentScreen === 'routes' && <RoutesScreen />}
+            {currentScreen === 'finances' && <FinancesScreen />}
+            {currentScreen === 'settings' && <SettingsScreen />}
+            {currentScreen === 'world' && <WorldView />}
+            {currentScreen === 'fleet-marketplace' && <FleetMarketplace />}
+            {currentScreen === 'marketplace' && <FleetMarketplace />}
           {(currentScreen === 'staff' || currentScreen === 'operations' || currentScreen === 'alliances' || currentScreen === 'events') && (
             <div className='h-full flex items-center justify-center'>
               <div className='text-center'>
