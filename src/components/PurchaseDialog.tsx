@@ -1,14 +1,13 @@
 import { useState } from 'react';
 import useFleetStore from '../store/fleetSlice';
-import { type AircraftListing, type AircraftType, PurchaseType } from '../types/game';
+import { type AircraftListing, PurchaseType } from '../types/game';
 
 interface PurchaseDialogProps {
   listing: AircraftListing;
-  aircraftType: AircraftType;
 }
 
-export default function PurchaseDialog({ listing, aircraftType }: PurchaseDialogProps) {
-  const [purchaseType, setPurchaseType] = useState<PurchaseType>('Cash');
+export default function PurchaseDialog({ listing }: PurchaseDialogProps) {
+  const [purchaseType, setPurchaseType] = useState<PurchaseType>(PurchaseType.Cash);
   const [downPaymentPercent, setDownPaymentPercent] = useState(20);
   const [loanTermMonths, setLoanTermMonths] = useState(60);
 
@@ -25,7 +24,7 @@ export default function PurchaseDialog({ listing, aircraftType }: PurchaseDialog
   const totalInterestPaid = Math.round(monthlyPayment * loanTermMonths - loanAmount);
 
   const handlePurchase = async () => {
-    const config = purchaseType === 'Cash'
+    const config = purchaseType === PurchaseType.Cash
       ? { type: PurchaseType.Cash, totalPriceUsd: listing.price }
       : {
           type: PurchaseType.Loan,
@@ -53,8 +52,8 @@ export default function PurchaseDialog({ listing, aircraftType }: PurchaseDialog
           <label className="flex items-center glass-panel p-4 rounded-lg cursor-pointer flex-1">
             <input
               type="radio"
-              checked={purchaseType === 'Cash'}
-              onChange={() => setPurchaseType('Cash')}
+              checked={purchaseType === PurchaseType.Cash}
+              onChange={() => setPurchaseType(PurchaseType.Cash)}
               className="mr-3 w-5 h-5"
             />
             <span className="text-white font-medium">Pay with Cash</span>
@@ -63,8 +62,8 @@ export default function PurchaseDialog({ listing, aircraftType }: PurchaseDialog
           <label className="flex items-center glass-panel p-4 rounded-lg cursor-pointer flex-1">
             <input
               type="radio"
-              checked={purchaseType === 'Loan'}
-              onChange={() => setPurchaseType('Loan')}
+              checked={purchaseType === PurchaseType.Loan}
+              onChange={() => setPurchaseType(PurchaseType.Loan)}
               className="mr-3 w-5 h-5"
             />
             <span className="text-white font-medium">Finance with Loan</span>
@@ -72,7 +71,7 @@ export default function PurchaseDialog({ listing, aircraftType }: PurchaseDialog
         </div>
 
         {/* Loan details (only shown when loan is selected) */}
-        {purchaseType === 'Loan' && (
+        {purchaseType === PurchaseType.Loan && (
           <div className="space-y-4">
             {/* Down payment slider */}
             <div>
@@ -151,7 +150,7 @@ export default function PurchaseDialog({ listing, aircraftType }: PurchaseDialog
         onClick={handlePurchase}
         className="w-full glass-button text-white py-3 rounded-lg font-medium hover:opacity-90 transition-opacity"
       >
-        {purchaseType === 'Cash' ? 'Complete Cash Purchase' : 'Confirm Loan & Purchase'}
+        {purchaseType === PurchaseType.Cash ? 'Complete Cash Purchase' : 'Confirm Loan & Purchase'}
       </button>
     </div>
   );

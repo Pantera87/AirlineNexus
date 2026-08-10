@@ -3,6 +3,7 @@ import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { useGameStore } from '@store/gameStore';
 import { useGameLoop } from '@hooks/useGameLoop';
+import { useUsedMarketTimer } from '@hooks/useUsedMarketTimer';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface LayoutProps {
@@ -13,6 +14,8 @@ export function Layout({ children }: LayoutProps) {
   const currentScreen = useGameStore((state) => state.currentScreen);
   // Run the game loop to advance time based on game speed
   useGameLoop();
+  // Refresh used marketplace weekly via game time engine
+  useUsedMarketTimer();
 
   return (
     <div className="flex h-screen w-full bg-cockpit-bg overflow-hidden select-none">

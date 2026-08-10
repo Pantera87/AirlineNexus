@@ -1,12 +1,15 @@
 import { useState } from 'react';
 import useFleetStore from '../store/fleetSlice';
+import { useGameStore } from '../store/gameStore';
 import FilterSidebar from './FilterSidebar';
 import AircraftGrid from './AircraftGrid';
 import AircraftDetailModal from './AircraftDetailModal';
+import { ArrowLeft } from 'lucide-react';
 
 export default function FleetMarketplace() {
   const [isFiltersOpen, setIsFiltersOpen] = useState(true);
   const { activeTab, switchTab } = useFleetStore();
+  const navigateTo = useGameStore((state) => state.navigateTo);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 relative overflow-hidden">
@@ -17,6 +20,15 @@ export default function FleetMarketplace() {
 
       {/* Main content */}
       <div className="relative z-10">
+        {/* Back button */}
+        <button
+          onClick={() => navigateTo('fleet')}
+          className="absolute top-6 left-6 flex items-center gap-2 text-blue-300 hover:text-white transition-colors"
+        >
+          <ArrowLeft className="w-5 h-5" />
+          Back to Fleet Management
+        </button>
+
         {/* Header */}
         <header className="text-center py-12 px-4">
           <h1 className="text-5xl font-bold text-white mb-4">Fleet Marketplace</h1>

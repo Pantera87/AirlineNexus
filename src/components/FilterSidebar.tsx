@@ -7,7 +7,7 @@ interface FilterSidebarProps {
   setIsOpen: (open: boolean) => void;
 }
 
-export default function FilterSidebar({ isOpen, setIsOpen }: FilterSidebarProps) {
+export default function FilterSidebar({ setIsOpen }: FilterSidebarProps) {
   const {
     activeFilters,
     setFilters,

@@ -67,13 +67,6 @@ function generateRandomFlightHours(yearBuilt: number): number {
   return Math.round(baseHours);
 }
 
-function generateRandomCycles(yearBuilt: number): number {
-  const age = currentGameYear - yearBuilt;
-  // Cycles roughly proportional to flight hours, but with different distribution
-  const baseCycles = (age * 3000) * 0.8 + Math.random() * (age * 3000) * 0.4;
-  return Math.round(baseCycles);
-}
-
 function getRandomSellerName(): string {
   const sellers = [
     "Aircraft Broker",
@@ -101,7 +94,6 @@ export function generateUsedListing(aircraftType: AircraftType): AircraftListing
 
   const condition = getRandomCondition();
   const flightHours = generateRandomFlightHours(yearBuilt);
-  const cycles = generateRandomCycles(yearBuilt);
 
   const price = calculateUsedPrice(aircraftType, yearBuilt, condition, flightHours);
 
@@ -165,7 +157,7 @@ export function getActiveListings(filter?: ListingFilter): AircraftListing[] {
 
     if (filter.priceRange) {
       listings = listings.filter(listing =>
-        listing.price >= filter.priceRange[0] && listing.price <= filter.priceRange[1]
+        filter.priceRange && listing.price >= filter.priceRange[0] && listing.price <= filter.priceRange[1]
       );
     }
 
@@ -179,21 +171,21 @@ export function getActiveListings(filter?: ListingFilter): AircraftListing[] {
       // For now, we'll skip range filtering in getActiveListings
     }
 
-    if (filter.conditionGrade && filter.conditionGrade.length > 0) {
+    if (filter.conditionGrade?.length && filter.conditionGrade.length > 0) {
       listings = listings.filter(listing =>
-        listing.condition && filter.conditionGrade.includes(listing.condition)
+        listing.condition && filter.conditionGrade!.includes(listing.condition)
       );
     }
 
-    if (filter.yearBuiltFrom) {
+    if (filter.yearBuiltFrom != null) {
       listings = listings.filter(listing =>
-        listing.manufactureYear && listing.manufactureYear >= filter.yearBuiltFrom
+        listing.manufactureYear != null && listing.manufactureYear >= filter.yearBuiltFrom!
       );
     }
 
-    if (filter.flightHoursMax) {
+    if (filter.flightHoursMax != null) {
       listings = listings.filter(listing =>
-        listing.totalFlightHours && listing.totalFlightHours <= filter.flightHoursMax
+        listing.totalFlightHours != null && listing.totalFlightHours <= filter.flightHoursMax!
       );
     }
   }

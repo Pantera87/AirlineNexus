@@ -60,7 +60,6 @@ function App() {
             {currentScreen === 'settings' && <SettingsScreen />}
             {currentScreen === 'world' && <WorldView />}
             {currentScreen === 'fleet-marketplace' && <FleetMarketplace />}
-            {currentScreen === 'marketplace' && <FleetMarketplace />}
           {(currentScreen === 'staff' || currentScreen === 'operations' || currentScreen === 'alliances' || currentScreen === 'events') && (
             <div className='h-full flex items-center justify-center'>
               <div className='text-center'>

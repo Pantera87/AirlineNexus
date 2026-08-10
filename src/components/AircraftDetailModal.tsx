@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import useFleetStore from '../store/fleetSlice';
-import { type AircraftListing, ConditionGrade } from '../types/game';
+import { ConditionGrade } from '../types/game';
 import { AIRCRAFT_TYPES } from '../data/aircraft-types';
 import PurchaseDialog from './PurchaseDialog';
 
@@ -93,15 +93,11 @@ export default function AircraftDetailModal() {
               <div className="space-y-2">
                 <SpecRow label="Range" value={`${formatNumber(aircraftType.rangeKm)} km`} />
                 <SpecRow label="Cruise Speed" value={`${formatNumber(aircraftType.cruiseSpeedKmh)} km/h`} />
-                <SpecRow label="Max Payload" value={`${formatNumber(aircraftType.maxPayloadKg)} kg`} />
                 <SpecRow label="Fuel Burn/Hour" value={`${formatNumber(aircraftType.fuelBurnPerHourKg)} kg`} />
               </div>
               <div className="space-y-2">
                 <SpecRow label="Economy Seats" value={aircraftType.seatsEconomy.toString()} />
                 <SpecRow label="Business Seats" value={aircraftType.seatsBusiness?.toString() || '0'} />
-                {aircraftType.seatsFirst && (
-                  <SpecRow label="First Class Seats" value={aircraftType.seatsFirst.toString()} />
-                )}
                 <SpecRow
                   label="Monthly Maintenance"
                   value={`$${formatCurrency(aircraftType.monthlyMaintenanceUsd)}`}
@@ -120,16 +116,13 @@ export default function AircraftDetailModal() {
                   label="Total Flight Hours"
                   value={formatNumber(listing.totalFlightHours || 0)}
                 />
-                {listing.cycles && (
-                  <SpecRow label="Cycles" value={formatNumber(listing.cycles)} />
-                )}
               </div>
             )}
           </div>
 
           {/* Purchase section */}
           <div className="border-t border-slate-700 pt-6">
-            <PurchaseDialog listing={listing} aircraftType={aircraftType} />
+            <PurchaseDialog listing={listing} />
           </div>
         </div>
       </div>
