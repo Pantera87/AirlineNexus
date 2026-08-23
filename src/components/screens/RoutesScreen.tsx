@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 export function RoutesScreen() {
   const airline = useGameStore((state) => state.airline);
+  const currencyFormat = useGameStore((state) => state.settings.currencyFormat);
   const addNotification = useGameStore((state) => state.addNotification);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [origin, setOrigin] = useState(airline?.headquarters || 'JFK');
@@ -108,7 +109,7 @@ export function RoutesScreen() {
                   <div>
                     <p className="text-xs text-runway-500">Profit</p>
                     <p className={`text-sm font-medium ${route.profitability >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {formatCurrency(route.revenue - route.cost, 'USD', true)}
+                      {formatCurrency(route.revenue - route.cost, currencyFormat, true)}
                     </p>
                   </div>
                 </div>

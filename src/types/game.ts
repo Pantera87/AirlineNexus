@@ -16,9 +16,9 @@ export interface AircraftType {
   range: number; // nautical miles
   cruiseSpeed: number; // knots
   
-  // Marketplace fields (Plan-aligned)
-  msrpUsd: number; // current MSRP/list price in USD
-  firstDeliveryYear: number; // year first delivered to customers
+  // Marketplace fields (Plan-aligned, optional for legacy data entries)
+  msrpUsd?: number; // current MSRP/list price in USD
+  firstDeliveryYear?: number; // year first delivered to customers
   
   maxPassengers: number;
   fuelBurnPerHour: number; // kg/hour
@@ -26,17 +26,17 @@ export interface AircraftType {
   // Costs (both kept for compatibility)
   acquisitionCost: number; // USD (legacy, = msrpUsd typically)
   weeklyMaintenanceCost: number; // USD (legacy)
-  monthlyMaintenanceUsd: number; // USD (plan-aligned)
+  monthlyMaintenanceUsd?: number; // USD (plan-aligned)
   
   weeklyLeaseCost?: number; // USD (optional, for leasing)
   era: number; // year introduced (legacy alias of firstDeliveryYear)
   imageKey: string;
   
-  inProduction: boolean; // true if currently manufactured (Buy New tab eligibility)
+  inProduction?: boolean; // true if currently manufactured (Buy New tab eligibility)
   productionEndYear?: number; // when production ended (for legacy aircraft)
   
-  insuranceMultiplier: number; // base multiplier for insurance premium calculation
-  compatibleAccessories: string[]; // accessory IDs that can be added
+  insuranceMultiplier?: number; // base multiplier for insurance premium calculation
+  compatibleAccessories?: string[]; // accessory IDs that can be added
   
   specs: {
     length: number; // meters
@@ -248,6 +248,8 @@ export interface Loan {
   remainingBalance: number;
   startDate: Date;
   endDate: Date;
+  aircraftId?: string; // Links loan to specific aircraft (for aircraft financing)
+  loanNumber?: string; // Display identifier, e.g. "LN-001"
 }
 
 export interface Investment {

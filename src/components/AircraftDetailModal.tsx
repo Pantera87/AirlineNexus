@@ -1,5 +1,7 @@
 import { useEffect } from 'react';
 import useFleetStore from '../store/fleetSlice';
+import { useGameStore } from '../store/gameStore';
+import { formatCurrency } from '../utils/helpers';
 import { ConditionGrade } from '../types/game';
 import { AIRCRAFT_TYPES } from '../data/aircraft-types';
 import PurchaseDialog from './PurchaseDialog';
@@ -11,6 +13,7 @@ export default function AircraftDetailModal() {
     newAircraftListings,
     usedAircraftListings
   } = useFleetStore();
+  const currencyFormat = useGameStore((state) => state.settings.currencyFormat);
 
   // Close modal on Escape key - moved immediately after store hook to maintain consistent hook order
   useEffect(() => {
@@ -81,7 +84,7 @@ export default function AircraftDetailModal() {
 
               {/* Price */}
               <div className="price-tag inline-block px-4 py-2 rounded-lg text-white font-bold">
-                ${formatCurrency(listing.price)}
+                {formatCurrency(listing.price, currencyFormat)}
               </div>
             </div>
           </div>
@@ -100,7 +103,7 @@ export default function AircraftDetailModal() {
                 <SpecRow label="Business Seats" value={aircraftType.seatsBusiness?.toString() || '0'} />
                 <SpecRow
                   label="Monthly Maintenance"
-                  value={`$${formatCurrency(aircraftType.monthlyMaintenanceUsd)}`}
+                  value={formatCurrency(aircraftType.monthlyMaintenanceUsd, currencyFormat)}
                 />
               </div>
             </div>
@@ -177,11 +180,4 @@ function formatNumber(num: number): string {
     return (num / 1000).toFixed(0) + 'K';
   }
   return num.toString();
-}
-
-function formatCurrency(amount: number): string {
-  return amount.toLocaleString('en-US', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0
-  });
 }

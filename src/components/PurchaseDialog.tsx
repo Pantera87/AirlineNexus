@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import useFleetStore from '../store/fleetSlice';
+import { useGameStore } from '../store/gameStore';
+import { formatCurrency } from '../utils/helpers';
 import { type AircraftListing, PurchaseType } from '../types/game';
 
 interface PurchaseDialogProps {
@@ -12,6 +14,7 @@ export default function PurchaseDialog({ listing }: PurchaseDialogProps) {
   const [loanTermMonths, setLoanTermMonths] = useState(60);
 
   const { purchaseAircraft } = useFleetStore();
+  const currencyFormat = useGameStore((state) => state.settings.currencyFormat);
 
   // Calculate loan details
   const downPaymentAmount = Math.round(listing.price * downPaymentPercent / 100);
@@ -114,15 +117,15 @@ export default function PurchaseDialog({ listing }: PurchaseDialogProps) {
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
                   <span className="text-gray-300">Aircraft Price:</span>
-                  <span className="text-white">${formatCurrency(listing.price)}</span>
+                  <span className="text-white">{formatCurrency(listing.price, currencyFormat)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-300">Down Payment ({downPaymentPercent}%):</span>
-                  <span className="text-white">-${formatCurrency(downPaymentAmount)}</span>
+                  <span className="text-white">-{formatCurrency(downPaymentAmount, currencyFormat)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-300">Loan Amount:</span>
-                  <span className="text-white">${formatCurrency(loanAmount)}</span>
+                  <span className="text-white">{formatCurrency(loanAmount, currencyFormat)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-300">Interest Rate:</span>
@@ -130,11 +133,11 @@ export default function PurchaseDialog({ listing }: PurchaseDialogProps) {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-300">Monthly Payment:</span>
-                  <span className="text-white">${formatCurrency(Math.round(monthlyPayment))}</span>
+                  <span className="text-white">{formatCurrency(Math.round(monthlyPayment), currencyFormat)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-300">Total Interest Paid:</span>
-                  <span className="text-white">${formatCurrency(totalInterestPaid)}</span>
+                  <span className="text-white">{formatCurrency(totalInterestPaid, currencyFormat)}</span>
                 </div>
               </div>
               <p className="text-xs text-gray-400 mt-2">
@@ -164,9 +167,3 @@ function calculateMonthlyPayment(principal: number, monthlyRate: number, termMon
   return Math.round(payment);
 }
 
-function formatCurrency(amount: number): string {
-  return amount.toLocaleString('en-US', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0
-  });
-}

@@ -46,7 +46,7 @@ export class LocalStorageDB {
     }
   }
 
-  static async updateGameTime(id: number, gameTime: any): Promise<any> {
+  static async updateGameTime(_id: number, gameTime: any): Promise<any> {
     try {
       const existing = await this.getGameTime();
       if (existing) {
@@ -66,7 +66,7 @@ export class LocalStorageDB {
     }
   }
 
-  static async deleteGameTime(id: number): Promise<void> {
+  static async deleteGameTime(_id: number): Promise<void> {
     try {
       localStorage.removeItem('gameTime');
     } catch (error) {

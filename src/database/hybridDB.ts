@@ -6,7 +6,6 @@ import { GameTimeEntity } from './entities/gameTime.entity';
 export class HybridDatabase {
   private static instance: HybridDatabase;
   private static useIndexedDB = true;
-  private static dbVersion = 1;
   
   private constructor() {
     // Private constructor to enforce singleton

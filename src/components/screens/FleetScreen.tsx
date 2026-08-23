@@ -2,9 +2,18 @@ import { useState } from 'react';
 import { useGameStore } from '@store/gameStore';
 import { AIRCRAFT_DATABASE, getAircraftByCategory } from '@data/aircraft';
 import { formatCurrency } from '@utils/helpers';
-import type { AircraftCategory } from '@/types/game';
-import { Plane, Plus, X, DollarSign, Gauge, Users, Navigation } from 'lucide-react';
+import type { Aircraft, AircraftCategory } from '@/types/game';
+import { Plane, Plus, X, DollarSign, Gauge, Users, Navigation, TrendingDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+
+// Estimate resale value: ~5% depreciation per year + condition factor
+function estimateSalePrice(aircraft: Aircraft): number | null {
+  const type = AIRCRAFT_DATABASE.find((a) => a.id === aircraft.typeId);
+  if (!type) return null;
+  const ageFactor = Math.max(0.1, 1 - aircraft.age * 0.05);
+  const conditionFactor = aircraft.condition / 100;
+  return Math.round(type.acquisitionCost * ageFactor * conditionFactor);
+}
 
 const categories: { id: AircraftCategory | 'all'; label: string }[] = [
   { id: 'all', label: 'All' },
@@ -19,12 +28,47 @@ export function FleetScreen() {
   const airline = useGameStore((state) => state.airline);
   const addNotification = useGameStore((state) => state.addNotification);
   const purchaseAircraft = useGameStore((state) => state.purchaseAircraft);
+  const sellAircraft = useGameStore((state) => state.sellAircraft);
   const navigateTo = useGameStore((state) => state.navigateTo);
   const currencyFormat = useGameStore((state) => state.settings.currencyFormat);
   const [activeCategory, setActiveCategory] = useState<AircraftCategory | 'all'>('all');
   const [showMarketplace, setShowMarketplace] = useState(false);
+  const [aircraftToSell, setAircraftToSell] = useState<Aircraft | null>(null);
+  const [saleResult, setSaleResult] = useState<{ success: boolean; message: string } | null>(null);
 
   if (!airline) return null;
+
+  const openSaleModal = (aircraft: Aircraft) => {
+    setSaleResult(null);
+    setAircraftToSell(aircraft);
+  };
+
+  const handleConfirmSale = () => {
+    if (!aircraftToSell) return;
+    try {
+      const result = sellAircraft(aircraftToSell.id);
+      addNotification({
+        type: result.success ? 'success' : 'error',
+        title: result.success ? 'Aircraft Sold' : 'Sale Failed',
+        message: result.message,
+      });
+      setSaleResult(result);
+    } catch (err) {
+      console.error('Failed to sell aircraft:', err);
+      const message = `Something went wrong while selling ${aircraftToSell.registration}. Check the console for details.`;
+      addNotification({
+        type: 'error',
+        title: 'Sale Failed',
+        message,
+      });
+      setSaleResult({ success: false, message });
+    }
+  };
+
+  const closeSaleModal = () => {
+    setAircraftToSell(null);
+    setSaleResult(null);
+  };
 
   const availableAircraft =
     activeCategory === 'all'
@@ -157,11 +201,118 @@ export function FleetScreen() {
                         <p className="text-sm font-medium text-white">{aircraft.totalFlightHours}</p>
                       </div>
                     </div>
+                    {(() => {
+                      const salePrice = estimateSalePrice(aircraft);
+                      return (
+                        <button
+                          onClick={() => openSaleModal(aircraft)}
+                          disabled={aircraft.status === 'in-flight'}
+                          className="btn-danger w-full mt-4 flex items-center justify-center gap-2 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                          title={salePrice ? `Estimated value: ${formatCurrency(salePrice, currencyFormat)}` : undefined}
+                        >
+                          <TrendingDown className="w-3.5 h-3.5" />
+                          Sell Aircraft
+                        </button>
+                      );
+                    })()}
                   </div>
                 );
               })}
           </div>
       )}
+
+      {/* Sale Confirmation Modal */}
+      <AnimatePresence>
+        {aircraftToSell && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm"
+            onClick={saleResult ? closeSaleModal : undefined}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="glass-panel w-full max-w-md p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center">
+                  <TrendingDown className="w-5 h-5 text-red-400" />
+                </div>
+                <h2 className="text-lg font-bold text-white">{saleResult ? 'Sale Complete' : 'Sell Aircraft'}</h2>
+              </div>
+
+              {saleResult && (
+                <div
+                  className={`rounded-lg p-4 mb-6 text-sm ${
+                    saleResult.success
+                      ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
+                      : 'bg-red-500/10 border border-red-500/30 text-red-300'
+                  }`}
+                >
+                  <p className="font-semibold mb-1">{saleResult.success ? '✅ Aircraft Sold' : '❌ Sale Failed'}</p>
+                  <p>{saleResult.message}</p>
+                </div>
+              )}
+
+              {!saleResult && (() => {
+                const type = AIRCRAFT_DATABASE.find((a) => a.id === aircraftToSell.typeId);
+                const salePrice = estimateSalePrice(aircraftToSell);
+                return (
+                  <>
+                    <p className="text-sm text-runway-400 mb-4">
+                      Are you sure you want to sell this aircraft? This action cannot be undone.
+                    </p>
+                    <div className="bg-runway-800/50 rounded-lg p-4 space-y-2 mb-6">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-runway-400">Aircraft</span>
+                        <span className="font-medium text-white">{type?.name || 'Unknown'}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-runway-400">Registration</span>
+                        <span className="font-medium text-white">{aircraftToSell.registration}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-runway-400">Age / Condition</span>
+                        <span className="font-medium text-white">{aircraftToSell.age}y / {aircraftToSell.condition}%</span>
+                      </div>
+                      {aircraftToSell.assignedRoute && (
+                        <p className="text-xs text-amber-400 pt-2 border-t border-white/5">
+                          ⚠ This aircraft is assigned to a route and will be unassigned.
+                        </p>
+                      )}
+                      <div className="flex justify-between items-center pt-3 border-t border-white/10">
+                        <span className="text-sm text-runway-400">Estimated Sale Price</span>
+                        <span className="text-lg font-bold text-emerald-400">
+                          {salePrice ? formatCurrency(salePrice, currencyFormat) : '—'}
+                        </span>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+
+              {saleResult ? (
+                <button onClick={closeSaleModal} className="btn-primary w-full text-sm">
+                  Done
+                </button>
+              ) : (
+                <div className="flex gap-3">
+                  <button onClick={closeSaleModal} className="btn-secondary flex-1 text-sm">
+                    Cancel
+                  </button>
+                  <button onClick={handleConfirmSale} className="btn-danger flex-1 text-sm">
+                    Confirm Sale
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {showMarketplace && (

@@ -14,8 +14,7 @@ import type {
   BusinessModel,
 } from '@/types/game';
 import { AIRCRAFT_DATABASE } from '@data/aircraft';
-import { generateId } from '@utils/helpers';
-import { DatabaseInitializer } from '@/database/init';
+import { generateId, formatCurrency } from '@utils/helpers';
 import { GameTimeEngine } from '@/utils/gameTimeEngine';
 import { GameTimeRepository } from '@/database/repositories/gameTime.repository';
 
@@ -109,6 +108,12 @@ interface GameStore extends GameState {
 
   // Aircraft management
   purchaseAircraft: (typeId: string) => boolean;
+  sellAircraft: (aircraftId: string, salePrice?: number) => { success: boolean; message: string };
+
+  // Loan management
+  payoffLoan: (loanId: string) => { success: boolean; message: string };
+  prepayLoan: (loanId: string, amount: number) => { success: boolean; message: string };
+  refinanceLoan: (loanId: string, newRatePercent: number, newTermMonths: number) => { success: boolean; message: string };
 
   // Route management
   createRoute: (origin: string, destination: string) => boolean;
@@ -201,8 +206,8 @@ export const useGameStore = create<GameStore>()(
         set({ difficulty });
       },
 
-       // Date/time management
-        advanceDate: async (hours: number) => {
+        // Date/time management
+        advanceDate: async (_hours: number) => {
           try {
             const gameTimeEngine = await GameTimeEngine.initializeFromDatabase();
             // For backward compatibility, we still need to handle the hours parameter
@@ -326,6 +331,229 @@ export const useGameStore = create<GameStore>()(
         });
 
         return true;
+      },
+
+      sellAircraft: (aircraftId: string, salePrice?: number) => {
+        const state = get();
+        const currency = state.settings.currencyFormat;
+        const airline = state.airline;
+        if (!airline) return { success: false, message: 'No active airline' };
+
+        const aircraft = airline.fleet.find((a) => a.id === aircraftId);
+        if (!aircraft) return { success: false, message: 'Aircraft not found in fleet' };
+
+        // Block selling aircraft that still have an active loan on them.
+        // The loan is linked via finances.loans[].aircraftId and would otherwise
+        // be orphaned (liabilities kept, no way to pay it off).
+        // `?? []` guards against old saves persisted before loans existed.
+        const activeLoan = (airline.finances.loans ?? []).find(
+          (loan) => loan.aircraftId === aircraft.id && loan.remainingBalance > 0
+        );
+        if (activeLoan) {
+          return {
+            success: false,
+            message: `${aircraft.registration} has an active loan (${formatCurrency(activeLoan.remainingBalance, currency)} remaining). Pay it off before selling.`,
+          };
+        }
+
+        // Calculate sale price if not provided
+        const aircraftType = AIRCRAFT_DATABASE.find((a) => a.id === aircraft.typeId);
+        let finalSalePrice: number;
+        if (salePrice !== undefined && salePrice > 0) {
+          finalSalePrice = salePrice;
+        } else if (aircraftType) {
+          // Depreciation: lose ~5% value per year, plus condition factor
+          const ageFactor = Math.max(0.1, 1 - aircraft.age * 0.05);
+          const conditionFactor = aircraft.condition / 100;
+          finalSalePrice = Math.round(aircraftType.acquisitionCost * ageFactor * conditionFactor);
+        } else {
+          return { success: false, message: 'Unable to determine sale price for this aircraft' };
+        }
+
+        // Single atomic update: unassign from routes (if needed), remove the
+        // aircraft from the fleet and apply the financial effects. Using one set()
+        // avoids a stale-state overwrite where the second update would clobber
+        // the route unassignment done by the first.
+        const updatedRoutes = aircraft.assignedRoute
+          ? airline.routes.map((r) => (r.aircraftId === aircraft.id ? { ...r, aircraftId: '' } : r))
+          : airline.routes;
+
+        set({
+          airline: {
+            ...airline,
+            routes: updatedRoutes,
+            fleet: airline.fleet.filter((a) => a.id !== aircraftId),
+            finances: {
+              ...airline.finances,
+              cash: airline.finances.cash + finalSalePrice,
+              // The aircraft's book value leaves the balance sheet; cash comes in.
+              assets: Math.max(0, airline.finances.assets - (finalSalePrice * 0.5)),
+              netWorth: airline.finances.netWorth + finalSalePrice,
+            },
+          },
+        });
+
+        return {
+          success: true,
+          message: `${aircraft.registration} sold for ${formatCurrency(finalSalePrice, currency)}`,
+        };
+      },
+
+      // Loan management
+      payoffLoan: (loanId) => {
+        const state = get();
+        const currency = state.settings.currencyFormat;
+        const airline = state.airline;
+        if (!airline) return { success: false, message: 'No active airline' };
+
+        const loans = airline.finances.loans ?? [];
+        const loan = loans.find((l) => l.id === loanId);
+        if (!loan) return { success: false, message: 'Loan not found' };
+        if (loan.remainingBalance <= 0) return { success: false, message: 'This loan is already paid off' };
+
+        const amount = Math.round(loan.remainingBalance);
+        if (airline.finances.cash < amount) {
+          return {
+            success: false,
+            message: `Insufficient funds. You need ${formatCurrency(amount, currency)} but only have ${formatCurrency(airline.finances.cash, currency)}.`,
+          };
+        }
+
+        const aircraft = airline.fleet.find((a) => a.id === loan.aircraftId);
+        set({
+          airline: {
+            ...airline,
+            finances: {
+              ...airline.finances,
+              cash: airline.finances.cash - amount,
+              liabilities: Math.max(0, airline.finances.liabilities - amount),
+              loans: loans.map((l) => (l.id === loanId ? { ...l, remainingBalance: 0 } : l)),
+            },
+          },
+        });
+
+        return {
+          success: true,
+            message: `Loan for ${aircraft?.registration ?? 'aircraft'} fully paid off (${formatCurrency(amount, currency)}).`,
+        };
+      },
+
+      prepayLoan: (loanId, amount) => {
+        const state = get();
+        const currency = state.settings.currencyFormat;
+        const airline = state.airline;
+        if (!airline) return { success: false, message: 'No active airline' };
+
+        const loans = airline.finances.loans ?? [];
+        const loan = loans.find((l) => l.id === loanId);
+        if (!loan) return { success: false, message: 'Loan not found' };
+        if (loan.remainingBalance <= 0) return { success: false, message: 'This loan is already paid off' };
+
+        const payment = Math.round(amount);
+        if (payment <= 0) return { success: false, message: 'Enter a valid prepayment amount.' };
+        if (payment > loan.remainingBalance) {
+          return {
+            success: false,
+            message: `Cannot prepay more than the remaining balance of ${formatCurrency(loan.remainingBalance, currency)}.`,
+          };
+        }
+        if (airline.finances.cash < payment) {
+          return {
+            success: false,
+            message: `Insufficient funds. You need ${formatCurrency(payment, currency)} but only have ${formatCurrency(airline.finances.cash, currency)}.`,
+          };
+        }
+
+        const newBalance = Math.max(0, loan.remainingBalance - payment);
+        set({
+          airline: {
+            ...airline,
+            finances: {
+              ...airline.finances,
+              cash: airline.finances.cash - payment,
+              liabilities: Math.max(0, airline.finances.liabilities - payment),
+              loans: loans.map((l) => (l.id === loanId ? { ...l, remainingBalance: newBalance } : l)),
+            },
+          },
+        });
+
+        return {
+          success: true,
+          message:
+            newBalance <= 0
+              ? `Loan paid off with prepayment of ${formatCurrency(payment, currency)}.`
+              : `Prepaid ${formatCurrency(payment, currency)}. New balance: ${formatCurrency(newBalance, currency)}.`,
+        };
+      },
+
+      refinanceLoan: (loanId, newRatePercent, newTermMonths) => {
+        const state = get();
+        const currency = state.settings.currencyFormat;
+        const airline = state.airline;
+        if (!airline) return { success: false, message: 'No active airline' };
+
+        const loans = airline.finances.loans ?? [];
+        const loan = loans.find((l) => l.id === loanId);
+        if (!loan) return { success: false, message: 'Loan not found' };
+        if (loan.remainingBalance <= 0) return { success: false, message: 'This loan is already paid off' };
+
+        const rate = newRatePercent;
+        const months = Math.max(1, Math.round(newTermMonths));
+        if (!isFinite(rate) || rate < 0) return { success: false, message: 'Enter a valid interest rate.' };
+
+        const principal = loan.remainingBalance;
+        const monthlyRate = rate / 12 / 100;
+        let newMonthlyPayment: number;
+        if (monthlyRate === 0) {
+          newMonthlyPayment = principal / months;
+        } else {
+          newMonthlyPayment =
+            (principal * (monthlyRate * Math.pow(1 + monthlyRate, months))) /
+            (Math.pow(1 + monthlyRate, months) - 1);
+        }
+
+        // Refinancing fee: 2% of the refinanced principal
+        const refinanceFee = Math.round(principal * 0.02);
+        if (airline.finances.cash < refinanceFee) {
+          return {
+            success: false,
+            message: `Insufficient funds to cover the ${formatCurrency(refinanceFee, currency)} refinancing fee.`,
+          };
+        }
+
+        const aircraft = airline.fleet.find((a) => a.id === loan.aircraftId);
+
+        // The refinanced balance starts a fresh term from today.
+        const refinanceDate = new Date(state.currentDate || new Date());
+        const newEndDate = new Date(refinanceDate);
+        newEndDate.setMonth(newEndDate.getMonth() + months);
+
+        set({
+          airline: {
+            ...airline,
+            finances: {
+              ...airline.finances,
+              cash: airline.finances.cash - refinanceFee,
+              totalExpenses: airline.finances.totalExpenses + refinanceFee,
+              loans: loans.map((l) =>
+                l.id === loanId
+                  ? {
+                      ...l,
+                      interestRate: rate,
+                      monthlyPayment: Math.round(newMonthlyPayment),
+                      startDate: refinanceDate,
+                      endDate: newEndDate,
+                    }
+                  : l
+              ),
+            },
+          },
+        });
+
+        return {
+          success: true,
+            message: `Loan for ${aircraft?.registration ?? 'aircraft'} refinanced at ${rate.toFixed(2)}% over ${months} months. New payment: ${formatCurrency(Math.round(newMonthlyPayment), currency)}. Fee: ${formatCurrency(refinanceFee, currency)}.`,
+        };
       },
 
       // Route management

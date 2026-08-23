@@ -50,9 +50,9 @@ export default function FilterSidebar({ setIsOpen }: FilterSidebarProps) {
   };
 
   return (
-    <div className="filter-sidebar h-[calc(100vh-200px)] overflow-y-auto rounded-lg p-6 sticky top-8">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-xl font-semibold text-white">Filters</h2>
+    <div className="filter-sidebar h-full max-h-full overflow-hidden rounded-lg p-4 flex flex-col">
+      <div className="flex justify-between items-center mb-3 shrink-0">
+        <h2 className="text-lg font-semibold text-white">Filters</h2>
         <button
           onClick={() => setIsOpen(false)}
           className="lg:hidden text-blue-400 hover:text-blue-300"
@@ -61,11 +61,11 @@ export default function FilterSidebar({ setIsOpen }: FilterSidebarProps) {
         </button>
       </div>
 
-      <form className="space-y-6">
+      <form className="space-y-3 flex-1 overflow-hidden">
         {/* Category filters */}
         <div>
-          <h3 className="text-lg font-medium text-white mb-3">Category</h3>
-          <div className="space-y-2">
+          <h3 className="text-sm font-medium text-white mb-2">Category</h3>
+          <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
             {['narrow-body', 'wide-body', 'regional', 'turboprop', 'cargo', 'business-jet'].map(category => (
               <label key={category} className="flex items-center">
                 <input
@@ -79,9 +79,9 @@ export default function FilterSidebar({ setIsOpen }: FilterSidebarProps) {
                       setFilters({ category: currentCategories.filter(c => c !== category) });
                     }
                   }}
-                  className="mr-2 glass-checkbox rounded"
+                  className="mr-1.5 glass-checkbox rounded"
                 />
-                <span className="text-gray-300 capitalize">{category.replace('-', ' ')}</span>
+                <span className="text-gray-300 text-xs capitalize">{category.replace('-', ' ')}</span>
               </label>
             ))}
           </div>
@@ -89,7 +89,7 @@ export default function FilterSidebar({ setIsOpen }: FilterSidebarProps) {
 
         {/* Manufacturer filters */}
         <div>
-          <h3 className="text-lg font-medium text-white mb-3">Manufacturer</h3>
+          <h3 className="text-sm font-medium text-white mb-2">Manufacturer</h3>
           <select
             multiple
             value={activeFilters.manufacturer || []}
@@ -109,7 +109,7 @@ export default function FilterSidebar({ setIsOpen }: FilterSidebarProps) {
 
         {/* Price range */}
         <div>
-          <h3 className="text-lg font-medium text-white mb-3">Price Range</h3>
+          <h3 className="text-sm font-medium text-white mb-2">Price Range</h3>
           <div className="flex gap-2 items-center">
             <input
               type="number"
@@ -120,9 +120,9 @@ export default function FilterSidebar({ setIsOpen }: FilterSidebarProps) {
                 updatePriceRange();
               }}
               placeholder="Min"
-              className="glass-input w-24 p-2 rounded text-white flex-1"
+              className="glass-input w-24 p-1.5 rounded text-white flex-1"
             />
-            <span className="text-gray-400">to</span>
+            <span className="text-gray-400 text-xs">to</span>
             <input
               type="number"
               value={priceMax}
@@ -132,14 +132,14 @@ export default function FilterSidebar({ setIsOpen }: FilterSidebarProps) {
                 updatePriceRange();
               }}
               placeholder="Max"
-              className="glass-input w-24 p-2 rounded text-white flex-1"
+              className="glass-input w-24 p-1.5 rounded text-white flex-1"
             />
           </div>
         </div>
 
         {/* Minimum capacity */}
         <div>
-          <h3 className="text-lg font-medium text-white mb-3">Minimum Capacity</h3>
+          <h3 className="text-sm font-medium text-white mb-2">Minimum Capacity</h3>
             <input
               type="number"
               value={capacityMin}
@@ -149,13 +149,13 @@ export default function FilterSidebar({ setIsOpen }: FilterSidebarProps) {
                 updateCapacityMin();
               }}
               placeholder="Seats"
-              className="glass-input w-full p-2 rounded text-white"
+              className="glass-input w-full p-1.5 rounded text-white"
             />
         </div>
 
         {/* Minimum range */}
         <div>
-          <h3 className="text-lg font-medium text-white mb-3">Minimum Range (km)</h3>
+          <h3 className="text-sm font-medium text-white mb-2">Minimum Range (km)</h3>
             <input
               type="number"
               value={rangeMin}
@@ -165,15 +165,15 @@ export default function FilterSidebar({ setIsOpen }: FilterSidebarProps) {
                 updateRangeMin();
               }}
               placeholder="Range"
-              className="glass-input w-full p-2 rounded text-white"
+              className="glass-input w-full p-1.5 rounded text-white"
             />
         </div>
 
         {/* Used-specific filters */}
         {activeFilters.conditionGrade && (
           <div>
-            <h3 className="text-lg font-medium text-white mb-3">Condition</h3>
-            <div className="space-y-2">
+            <h3 className="text-sm font-medium text-white mb-2">Condition</h3>
+            <div className="space-y-1.5">
               {Object.values(ConditionGrade).map(condition => (
                 <label key={condition} className="flex items-center">
                   <input
@@ -187,9 +187,9 @@ export default function FilterSidebar({ setIsOpen }: FilterSidebarProps) {
                         setFilters({ conditionGrade: currentConditions.filter(c => c !== condition) });
                       }
                     }}
-                    className="mr-2 glass-checkbox rounded"
+                    className="mr-1.5 glass-checkbox rounded"
                   />
-                  <span className={`text-gray-300 ${getConditionClass(condition)}`}>
+                  <span className={`text-gray-300 text-xs ${getConditionClass(condition)}`}>
                     {formatCondition(condition)}
                   </span>
                 </label>
@@ -200,7 +200,7 @@ export default function FilterSidebar({ setIsOpen }: FilterSidebarProps) {
 
         {/* Year built range (used only) */}
         <div>
-          <h3 className="text-lg font-medium text-white mb-3">Year Built</h3>
+          <h3 className="text-sm font-medium text-white mb-2">Year Built</h3>
             <input
               type="number"
               value={yearBuiltFrom}
@@ -212,13 +212,13 @@ export default function FilterSidebar({ setIsOpen }: FilterSidebarProps) {
               placeholder="From year"
               min="1960"
               max={new Date().getFullYear()}
-              className="glass-input w-full p-2 rounded text-white"
+              className="glass-input w-full p-1.5 rounded text-white"
             />
         </div>
 
         {/* Flight hours (used only) */}
         <div>
-          <h3 className="text-lg font-medium text-white mb-3">Max Flight Hours</h3>
+          <h3 className="text-sm font-medium text-white mb-2">Max Flight Hours</h3>
             <input
               type="number"
               value={flightHoursMax}
@@ -228,16 +228,16 @@ export default function FilterSidebar({ setIsOpen }: FilterSidebarProps) {
                 updateFlightHoursMax();
               }}
               placeholder="Hours"
-              className="glass-input w-full p-2 rounded text-white"
+              className="glass-input w-full p-1.5 rounded text-white"
             />
         </div>
 
         {/* Action buttons */}
-        <div className="flex gap-3 pt-4">
+        <div className="flex gap-3 pt-2 shrink-0">
           <button
             type="button"
             onClick={clearAllFilters}
-            className="bg-red-600/30 border border-red-500 text-red-300 px-4 py-2 rounded-lg flex-1 hover:bg-red-600/40 transition-colors"
+            className="bg-red-600/30 border border-red-500 text-red-300 px-4 py-1.5 rounded-lg flex-1 hover:bg-red-600/40 transition-colors"
           >
             Clear All
           </button>

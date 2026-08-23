@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import useFleetStore from '../store/fleetSlice';
+import { useGameStore } from '../store/gameStore';
+import { formatCurrency } from '../utils/helpers';
 import { type AircraftListing, ConditionGrade } from '../types/game';
 import { AIRCRAFT_TYPES } from '../data/aircraft-types';
 
@@ -10,6 +12,7 @@ interface AircraftCardProps {
 export default function AircraftCard({ listing }: AircraftCardProps) {
   const [isHovered, setIsHovered] = useState(false);
   const { selectListing } = useFleetStore();
+  const currencyFormat = useGameStore((state) => state.settings.currencyFormat);
 
   // Get aircraft type details
   const aircraftType = AIRCRAFT_TYPES[listing.aircraftTypeId];
@@ -48,7 +51,7 @@ export default function AircraftCard({ listing }: AircraftCardProps) {
           <span className="font-medium">Speed:</span> {formatNumber(aircraftType.cruiseSpeedKmh)} km/h
         </div>
         <div>
-          <span className="font-medium">Price:</span> ${formatCurrency(listing.price)}
+          <span className="font-medium">Price:</span> {formatCurrency(listing.price, currencyFormat)}
         </div>
       </div>
 
@@ -103,11 +106,4 @@ function formatNumber(num: number): string {
     return (num / 1000).toFixed(0) + 'K';
   }
   return num.toString();
-}
-
-function formatCurrency(amount: number): string {
-  return amount.toLocaleString('en-US', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0
-  });
 }

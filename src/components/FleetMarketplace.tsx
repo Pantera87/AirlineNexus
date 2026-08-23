@@ -12,10 +12,10 @@ export default function FleetMarketplace() {
   const navigateTo = useGameStore((state) => state.navigateTo);
 
   return (
-    <div className="h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 relative flex flex-col">
+    <div className="h-screen bg-linear-to-br from-slate-900 via-slate-800 to-slate-900 relative flex flex-col">
       {/* Background pattern - aircraft silhouette overlay */}
       <div className="absolute inset-0 opacity-5 pointer-events-none">
-        <div className="w-full h-full bg-[radial-gradient(circle_at_center,_rgba(148,163,255,0.1)_0%,_transparent_70%)]" />
+        <div className="w-full h-full bg-[radial-gradient(circle_at_center,rgba(148,163,255,0.1)_0%,transparent_70%)]" />
       </div>
 
       {/* Main content */}
@@ -66,7 +66,7 @@ export default function FleetMarketplace() {
         <div className="flex-1 px-4 pb-6 overflow-hidden flex flex-col">
           <div className="max-w-7xl mx-auto h-full grid grid-cols-1 lg:grid-cols-4 gap-6">
             {/* Filter sidebar - hidden on mobile, toggleable on desktop */}
-            <div className={`lg:block ${isFiltersOpen ? 'block' : 'hidden'} lg:col-span-1`}>
+            <div className={`h-full min-h-0 ${isFiltersOpen ? 'block' : 'hidden'} lg:col-span-1`}>
               <FilterSidebar
                 isOpen={isFiltersOpen}
                 setIsOpen={setIsFiltersOpen}
@@ -74,7 +74,7 @@ export default function FleetMarketplace() {
             </div>
 
             {/* Aircraft grid - takes full width on mobile, 3 cols on desktop */}
-            <div className="lg:col-span-3 flex flex-col h-full overflow-hidden">
+            <div className="lg:col-span-3 flex flex-col h-full min-h-0 overflow-hidden">
               <AircraftGrid activeTab={activeTab} />
 
               {/* Filters toggle button for mobile */}

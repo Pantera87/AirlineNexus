@@ -13,7 +13,6 @@ import {
   getActiveListings as getActiveUsedListings
 } from '../data/market-generator';
 import { useGameStore } from './gameStore';
-import { AIRCRAFT_DATABASE } from '../data/aircraft';
 
 // Map marketplace aircraftTypeId to game AIRCRAFT_DATABASE id
 function mapMarketplaceIdToGameId(marketplaceId: string): string | null {
@@ -232,17 +231,42 @@ export const useFleetStore = create<FleetMarketplaceState>((set, get) => ({
       const playerCash = airline.finances.cash;
       const totalPrice = config.totalPriceUsd || listing.price;
 
-      // Calculate costs based on purchase type
-      let cashRequired = 0;
-      let loanId: string | undefined;
+      // Generate aircraft ID early so we can link it to the loan
+      const newAircraftId = `aircraft-${Date.now()}`;
 
+      // Calculate upfront cash required based on purchase type
+      let cashRequired = 0;
       if (config.type === 'Cash') {
         cashRequired = totalPrice;
       } else if (config.type === 'Loan') {
         const downPaymentPercent = config.downPaymentPercent ?? 20;
         cashRequired = Math.round(totalPrice * downPaymentPercent / 100);
+      }
 
-        // Create loan for the remainder
+      // Validate affordability BEFORE creating any loan, so a failed
+      // purchase never leaves an orphaned loan inflating liabilities.
+      if (playerCash < cashRequired) {
+        return {
+          success: false,
+          message: config.type === 'Cash'
+            ? 'Insufficient funds for cash purchase'
+            : 'Insufficient funds for down payment'
+        };
+      }
+
+      // Map marketplace aircraftTypeId to game AIRCRAFT_DATABASE id so FleetScreen can find it.
+      // Checked before loan creation for the same reason as the affordability check above.
+      const gameId = mapMarketplaceIdToGameId(listing.aircraftTypeId);
+      if (!gameId) {
+        return {
+          success: false,
+          message: 'Unable to process this aircraft type. Please try a different one.'
+        };
+      }
+
+      // Create the loan (only after all validation has passed)
+      let loanId: string | undefined;
+      if (config.type === 'Loan') {
         const loanAmount = totalPrice - cashRequired;
         const loanTermMonths = config.loanTermMonths ?? 60;
         const interestRate = (config.interestRatePercent ?? 5.5) / 100;
@@ -267,7 +291,8 @@ export const useFleetStore = create<FleetMarketplaceState>((set, get) => ({
           monthlyPayment: Math.round(monthlyPayment),
           remainingBalance: loanAmount,
           startDate,
-          endDate
+          endDate,
+          aircraftId: newAircraftId // Link loan to this specific aircraft
         };
 
         // Update gameStore with new loan and reduced cash
@@ -286,16 +311,6 @@ export const useFleetStore = create<FleetMarketplaceState>((set, get) => ({
         });
 
         loanId = newLoan.id;
-      }
-
-      // Check if player has enough cash for the required payment
-      if (playerCash < cashRequired) {
-        return {
-          success: false,
-          message: config.type === 'Cash'
-            ? 'Insufficient funds for cash purchase'
-            : 'Insufficient funds for down payment'
-        };
       }
 
       // Generate registration number using airline's IATA code
@@ -326,21 +341,12 @@ export const useFleetStore = create<FleetMarketplaceState>((set, get) => ({
         }
       }
 
-      // Map marketplace aircraftTypeId to game AIRCRAFT_DATABASE id so FleetScreen can find it
-      const gameId = mapMarketplaceIdToGameId(listing.aircraftTypeId);
-      if (!gameId) {
-        return {
-          success: false,
-          message: 'Unable to process this aircraft type. Please try a different one.'
-        };
-      }
-
       // Create the new Aircraft record matching gameStore's expected format
       const now = gameState.currentDate;
       const maintenanceDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days from now
 
       const newAircraft: Aircraft = {
-        id: `aircraft-${Date.now()}`,
+        id: newAircraftId, // Use the pre-generated ID so loan link matches
         typeId: gameId,
         registration: regNumber,
         age: currentYear - (manufactureYear || currentYear),
@@ -367,7 +373,9 @@ export const useFleetStore = create<FleetMarketplaceState>((set, get) => ({
             finances: {
               ...state.airline.finances,
               cash: newCash,
-              assets: state.airline.finances.assets + totalPrice - cashRequired
+              // The aircraft's full value is a new asset regardless of how it was paid for.
+              // (For loans the offsetting entry is the liability added above.)
+              assets: state.airline.finances.assets + totalPrice
             }
           }
         };

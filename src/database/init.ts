@@ -1,6 +1,5 @@
 // Database initialization for aviation simulation
 import { HybridDatabase } from './hybridDB';
-import { GameTimeEntity } from './entities/gameTime.entity';
 
 export class DatabaseInitializer {
   /**

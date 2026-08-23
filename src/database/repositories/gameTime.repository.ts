@@ -3,8 +3,6 @@ import { GameTimeEntity } from '../entities/gameTime.entity';
 import { LocalStorageDB } from '../localStorageDB';
 
 export class GameTimeRepository {
-  private static readonly ENTITY_NAME = 'gameTime';
-
   /**
    * Get the current game time from storage
    */

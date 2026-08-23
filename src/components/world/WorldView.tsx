@@ -67,20 +67,6 @@ function getSolarDeclination(dayOfYear: number): number {
   return AXIAL_TILT_BASE * Math.sin((2 * Math.PI * (dayOfYear - 80)) / 365)
 }
 
-// Calculate sun's 3D position based on game time.
-// The Y component varies seasonally via solar declination so the real angle between sun and Earth is preserved.
-function getSunPosition(date: Date): [number, number, number] {
-  const angle = getSunOrbitAngle(date)
-  const dayOfYear = getDayOfYear(date)
-  const declination = getSolarDeclination(dayOfYear)
-
-  const x = SUN_DISTANCE * Math.cos(angle)
-  const y = SUN_DISTANCE * Math.sin(declination)
-  const z = SUN_DISTANCE * Math.sin(angle)
-
-  return [x, y, z]
-}
-
 // Sun component with bloom-like glow that orbits around Earth based on game time
 function Sun({ lightRef }: { lightRef: React.RefObject<DirectionalLight | null> }) {
   const groupRef = useRef<Group>(null)
