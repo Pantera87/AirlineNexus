@@ -8,7 +8,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "lint": "eslint src --ext .ts,.tsx",
-    "test": "vitest"
+    "test": "vitest",
+    "generate:airports": "node scripts/generate-airports.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",

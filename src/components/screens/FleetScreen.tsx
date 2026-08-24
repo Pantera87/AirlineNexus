@@ -5,6 +5,7 @@ import { formatCurrency } from '@utils/helpers';
 import type { Aircraft, AircraftCategory } from '@/types/game';
 import { Plane, Plus, X, DollarSign, Gauge, Users, Navigation, TrendingDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import AircraftImage from '../AircraftImage';
 
 // Estimate resale value: ~5% depreciation per year + condition factor
 function estimateSalePrice(aircraft: Aircraft): number | null {
@@ -162,7 +163,7 @@ export function FleetScreen() {
         </div>
         </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
             {airline.fleet
               .filter((aircraft) => {
                 const type = AIRCRAFT_DATABASE.find((a) => a.id === aircraft.typeId);
@@ -172,49 +173,42 @@ export function FleetScreen() {
               .map((aircraft) => {
                 const type = AIRCRAFT_DATABASE.find((a) => a.id === aircraft.typeId);
                 return (
-                  <div key={aircraft.id} className="glass-panel p-5">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-sky-500/10 flex items-center justify-center">
-                          <Plane className="w-5 h-5 text-sky-400" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold text-white">{type?.name || 'Unknown'}</p>
-                          <p className="text-xs text-runway-400">{aircraft.registration}</p>
-                        </div>
+                  <div key={aircraft.id} className="glass-panel p-2 flex flex-col">
+                    {type?.imageKey ? (
+                      <AircraftImage keyOrId={type.imageKey} alt={type.name} className="w-full aspect-[16/8] rounded-lg" />
+                    ) : (
+                      <div className="w-full aspect-[16/8] rounded-lg bg-sky-500/10 flex items-center justify-center">
+                        <Plane className="w-7 h-7 text-sky-400" />
                       </div>
-                      <span className={`badge ${aircraft.status === 'available' ? 'badge-success' : 'badge-warning'}`}>
-                        {aircraft.status}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2 text-center">
-                      <div>
-                        <p className="text-xs text-runway-500">Age</p>
-                        <p className="text-sm font-medium text-white">{aircraft.age}y</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-runway-500">Condition</p>
-                        <p className="text-sm font-medium text-white">{aircraft.condition}%</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-runway-500">Hours</p>
-                        <p className="text-sm font-medium text-white">{aircraft.totalFlightHours}</p>
+                    )}
+                    <div className="mt-1.5 min-w-0">
+                      <p className="text-sm font-semibold text-white truncate">{type?.name || 'Unknown'}</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-xs text-runway-400">{aircraft.registration}</span>
+                        <span className={`badge ${aircraft.status === 'available' ? 'badge-success' : 'badge-warning'}`}>
+                          {aircraft.status}
+                        </span>
                       </div>
                     </div>
-                    {(() => {
-                      const salePrice = estimateSalePrice(aircraft);
-                      return (
-                        <button
-                          onClick={() => openSaleModal(aircraft)}
-                          disabled={aircraft.status === 'in-flight'}
-                          className="btn-danger w-full mt-4 flex items-center justify-center gap-2 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
-                          title={salePrice ? `Estimated value: ${formatCurrency(salePrice, currencyFormat)}` : undefined}
-                        >
-                          <TrendingDown className="w-3.5 h-3.5" />
-                          Sell Aircraft
-                        </button>
-                      );
-                    })()}
+                    <div className="mt-auto pt-1.5 flex items-center justify-between gap-2">
+                      <p className="text-[11px] text-runway-500">
+                        {aircraft.age}y · {aircraft.condition}% cond · {aircraft.totalFlightHours}h
+                      </p>
+                      {(() => {
+                        const salePrice = estimateSalePrice(aircraft);
+                        return (
+                          <button
+                            onClick={() => openSaleModal(aircraft)}
+                            disabled={aircraft.status === 'in-flight'}
+                            className="btn-danger shrink-0 flex items-center justify-center gap-1.5 text-xs px-2.5 py-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                            title={salePrice ? `Estimated value: ${formatCurrency(salePrice, currencyFormat)}` : undefined}
+                          >
+                            <TrendingDown className="w-3 h-3" />
+                            Sell
+                          </button>
+                        );
+                      })()}
+                    </div>
                   </div>
                 );
               })}
@@ -356,8 +350,11 @@ export function FleetScreen() {
               <div className="flex-1 overflow-auto p-4 space-y-3">
                 {availableAircraft.map((ac) => (
                   <div key={ac.id} className="p-4 rounded-lg bg-runway-800/50 hover:bg-runway-800 transition-colors">
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
+                      <div className="flex items-center justify-between">
+                      <div className="flex-1 flex items-center gap-3">
+                        {ac.imageKey ? (
+                          <AircraftImage keyOrId={ac.imageKey} alt={ac.name} className="w-20 h-12 rounded-lg shrink-0" />
+                        ) : null}
                         <div className="flex items-center gap-2 mb-2">
                           <h3 className="text-sm font-semibold text-white">{ac.name}</h3>
                           <span className="badge badge-info">{ac.category}</span>

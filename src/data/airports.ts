@@ -1,7 +1,8 @@
 import { Airport } from '@/types/game';
+import { CSV_AIRPORTS } from './airports-full.generated';
 
-// Major world airports for the simulation
-export const AIRPORT_DATABASE: Airport[] = [
+// Hand-tuned hub airports with special attributes (landing fees, slots, popularity)
+const CURATED_HUBS: Airport[] = [
   // North America
   {
     iata: 'JFK',
@@ -370,9 +371,22 @@ export const AIRPORT_DATABASE: Airport[] = [
   },
 ];
 
+// ------------------------------------------------------------
+// Merged database: curated hubs take precedence over CSV data
+// on IATA conflicts to preserve hand-tuned attributes.
+// ------------------------------------------------------------
+const CURATED_IATA_SET = new Set(CURATED_HUBS.map((a) => a.iata));
+
+export const AIRPORT_DATABASE: Airport[] = [
+  ...CURATED_HUBS,
+  ...CSV_AIRPORTS.filter((a) => !CURATED_IATA_SET.has(a.iata)),
+];
+
+const AIRPORT_BY_IATA = new Map(AIRPORT_DATABASE.map((a) => [a.iata, a]));
+
 // Helper functions
 export function getAirportByIata(iata: string): Airport | undefined {
-  return AIRPORT_DATABASE.find(airport => airport.iata === iata);
+  return AIRPORT_BY_IATA.get(iata);
 }
 
 export function getAirportsByCountry(country: string): Airport[] {

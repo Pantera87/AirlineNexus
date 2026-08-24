@@ -1,10 +1,11 @@
 import { useGameStore } from '@store/gameStore';
+import { NotificationDropdown } from '@components/layout/NotificationDropdown';
 import {
   Play,
   Pause,
   FastForward,
-  Bell,
   Calendar,
+  Fuel,
 } from 'lucide-react';
 import { formatCurrency } from '@utils/helpers';
 import { GameTimeEngine } from '@utils/gameTimeEngine';
@@ -15,8 +16,8 @@ export function TopBar() {
   const gameSpeed = useGameStore((state) => state.gameSpeed);
   const setGameSpeed = useGameStore((state) => state.setGameSpeed);
   const airline = useGameStore((state) => state.airline);
-  const notifications = useGameStore((state) => state.notifications);
-  const unreadCount = notifications.filter((n) => !n.isRead).length;
+  const currentScreen = useGameStore((state) => state.currentScreen);
+  const navigateTo = useGameStore((state) => state.navigateTo);
 
   // Use GameTimeEngine to display date and time
   const safeCurrentDate = currentDate && currentDate instanceof Date ? currentDate : new Date();
@@ -31,7 +32,7 @@ export function TopBar() {
   ];
 
   return (
-    <header className="h-16 bg-cockpit-panel/80 backdrop-blur-sm border-b border-white/5 px-6 flex items-center justify-between">
+    <header className="relative z-30 h-16 bg-cockpit-panel/80 backdrop-blur-sm border-b border-white/5 px-6 flex items-center justify-between">
       {/* Left: Date & Time */}
       <div className="flex items-center gap-6">
         <div className="flex items-center gap-2 text-runway-300">
@@ -72,15 +73,17 @@ export function TopBar() {
           </div>
         )}
 
-        {/* Notifications */}
-        <button className="relative p-2 text-runway-400 hover:text-white transition-colors">
-          <Bell className="w-5 h-5" />
-          {unreadCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 rounded-full text-[10px] flex items-center justify-center text-white font-bold">
-              {unreadCount}
-            </span>
-          )}
+        {/* Fuel Market */}
+        <button
+          onClick={() => navigateTo('fuel')}
+          className={`p-2 transition-colors ${currentScreen === 'fuel' ? 'text-sky-400 bg-sky-500/10 rounded-lg' : 'text-runway-400 hover:text-white'}`}
+          title="Fuel Market"
+        >
+          <Fuel className="w-5 h-5" />
         </button>
+
+        {/* Notifications */}
+        <NotificationDropdown />
 
         {/* Status Indicator */}
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-runway-800">

@@ -4,6 +4,8 @@ import { useGameStore } from '../store/gameStore';
 import { formatCurrency } from '../utils/helpers';
 import { type AircraftListing, ConditionGrade } from '../types/game';
 import { AIRCRAFT_TYPES } from '../data/aircraft-types';
+import { AIRCRAFT_DATABASE } from '../data/aircraft';
+import AircraftImage from './AircraftImage';
 
 interface AircraftCardProps {
   listing: AircraftListing;
@@ -19,6 +21,13 @@ export default function AircraftCard({ listing }: AircraftCardProps) {
 
   if (!aircraftType) return null;
 
+  // Find matching imageKey from the database (bridges naming conventions)
+  const dbMatch = AIRCRAFT_DATABASE.find(
+    (db) =>
+      db.name.toLowerCase().replace(/[^a-z0-9]/g, '') ===
+      `${aircraftType.manufacturer} ${aircraftType.model}`.toLowerCase().replace(/[^a-z0-9]/g, '')
+  );
+
   return (
     <button
       onClick={() => selectListing(listing.id)}
@@ -26,10 +35,14 @@ export default function AircraftCard({ listing }: AircraftCardProps) {
       onMouseLeave={() => setIsHovered(false)}
       className={`aircraft-card-glass w-full aspect-[3/4] p-6 text-left transition-all duration-300 ${isHovered ? 'scale-[1.02]' : ''}`}
     >
-      {/* Aircraft image placeholder */}
-      <div className="mb-4 h-32 bg-slate-700 rounded-lg flex items-center justify-center overflow-hidden">
-        <span className="text-gray-500 text-sm">Aircraft Image</span>
-      </div>
+      {/* Aircraft image */}
+      <AircraftImage
+        keyOrId={dbMatch?.imageKey || aircraftType.id}
+        fallbackKeys={[aircraftType.id]}
+        alt={`${aircraftType.manufacturer} ${aircraftType.model}`}
+        className="mb-4 w-full aspect-[16/9] rounded-lg"
+        fit="contain"
+      />
 
       {/* Manufacturer badge */}
       <div className="manufacturer-badge inline-block px-3 py-1 rounded-full text-xs font-medium mb-2">

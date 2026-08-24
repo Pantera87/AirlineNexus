@@ -7,7 +7,9 @@ import { DashboardScreen } from '@components/screens/DashboardScreen';
 import { FleetScreen } from '@components/screens/FleetScreen';
 import { RoutesScreen } from '@components/screens/RoutesScreen';
 import { FinancesScreen } from '@components/screens/FinancesScreen';
+import { FuelScreen } from '@components/screens/FuelScreen';
 import { SettingsScreen } from '@components/screens/SettingsScreen';
+import { NotificationsScreen } from '@components/screens/NotificationsScreen';
 import { WorldView } from '@components/world/WorldView';
 import FleetMarketplace from './components/FleetMarketplace';
 
@@ -57,7 +59,9 @@ function App() {
             {currentScreen === 'fleet' && <FleetScreen />}
             {currentScreen === 'routes' && <RoutesScreen />}
             {currentScreen === 'finances' && <FinancesScreen />}
+            {currentScreen === 'fuel' && <FuelScreen />}
             {currentScreen === 'settings' && <SettingsScreen />}
+            {currentScreen === 'notifications' && <NotificationsScreen />}
             {currentScreen === 'world' && <WorldView />}
             {currentScreen === 'fleet-marketplace' && <FleetMarketplace />}
           {(currentScreen === 'staff' || currentScreen === 'operations' || currentScreen === 'alliances' || currentScreen === 'events') && (

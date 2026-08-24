@@ -12,26 +12,36 @@ export default function PurchaseDialog({ listing }: PurchaseDialogProps) {
   const [purchaseType, setPurchaseType] = useState<PurchaseType>(PurchaseType.Cash);
   const [downPaymentPercent, setDownPaymentPercent] = useState(20);
   const [loanTermMonths, setLoanTermMonths] = useState(60);
+  const [quantity, setQuantity] = useState(1);
 
   const { purchaseAircraft } = useFleetStore();
   const currencyFormat = useGameStore((state) => state.settings.currencyFormat);
 
-  // Calculate loan details
-  const downPaymentAmount = Math.round(listing.price * downPaymentPercent / 100);
-  const loanAmount = listing.price - downPaymentAmount;
+  // Used listings are single airframes and can only be purchased one at a time.
+  const maxQuantity = listing.isNew ? 20 : 1;
+
+  // Calculate loan details (per aircraft, then scaled by quantity)
+  const downPaymentPerAircraft = Math.round(listing.price * downPaymentPercent / 100);
+  const loanAmountPerAircraft = listing.price - downPaymentPerAircraft;
+  const downPaymentAmount = downPaymentPerAircraft * quantity;
+  const loanAmount = loanAmountPerAircraft * quantity;
 
   // Simple interest calculation (for demonstration)
   const annualInterestRate = 5.75; // APR based on airline credit rating
   const monthlyInterestRate = annualInterestRate / 12 / 100;
-  const monthlyPayment = calculateMonthlyPayment(loanAmount, monthlyInterestRate, loanTermMonths);
-  const totalInterestPaid = Math.round(monthlyPayment * loanTermMonths - loanAmount);
+  const monthlyPaymentPerAircraft = calculateMonthlyPayment(loanAmountPerAircraft, monthlyInterestRate, loanTermMonths);
+  const monthlyPayment = monthlyPaymentPerAircraft * quantity;
+  const totalInterestPaid = Math.round(monthlyPaymentPerAircraft * loanTermMonths - loanAmountPerAircraft) * quantity;
+
+  const totalCost = listing.price * quantity;
 
   const handlePurchase = async () => {
     const config = purchaseType === PurchaseType.Cash
-      ? { type: PurchaseType.Cash, totalPriceUsd: listing.price }
+      ? { type: PurchaseType.Cash, totalPriceUsd: listing.price, quantity }
       : {
           type: PurchaseType.Loan,
           totalPriceUsd: listing.price,
+          quantity,
           downPaymentPercent,
           loanTermMonths,
           interestRatePercent: annualInterestRate
@@ -50,6 +60,30 @@ export default function PurchaseDialog({ listing }: PurchaseDialogProps) {
       {/* Purchase options */}
       <div>
         <h3 className="text-xl font-semibold text-white mb-4">Purchase Options</h3>
+
+        {/* Quantity selector (new listings only — used listings are single airframes) */}
+        {listing.isNew && (
+          <div className="mb-6">
+            <label className="block text-white mb-2">Quantity</label>
+            <div className="flex items-center gap-3 w-fit">
+              <button
+                onClick={() => setQuantity(q => Math.max(1, q - 1))}
+                disabled={quantity <= 1}
+                className="glass-button w-9 h-9 rounded-lg text-white font-bold disabled:opacity-40"
+              >
+                −
+              </button>
+              <span className="text-white font-bold text-xl w-8 text-center">{quantity}</span>
+              <button
+                onClick={() => setQuantity(q => Math.min(maxQuantity, q + 1))}
+                disabled={quantity >= maxQuantity}
+                className="glass-button w-9 h-9 rounded-lg text-white font-bold disabled:opacity-40"
+              >
+                +
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="flex gap-4 mb-6">
           <label className="flex items-center glass-panel p-4 rounded-lg cursor-pointer flex-1">
@@ -116,8 +150,8 @@ export default function PurchaseDialog({ listing }: PurchaseDialogProps) {
               <h4 className="font-semibold text-white mb-3">Loan Summary</h4>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-gray-300">Aircraft Price:</span>
-                  <span className="text-white">{formatCurrency(listing.price, currencyFormat)}</span>
+                  <span className="text-gray-300">Total Cost ({quantity} × {formatCurrency(listing.price, currencyFormat)}):</span>
+                  <span className="text-white">{formatCurrency(totalCost, currencyFormat)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-300">Down Payment ({downPaymentPercent}%):</span>
@@ -153,7 +187,9 @@ export default function PurchaseDialog({ listing }: PurchaseDialogProps) {
         onClick={handlePurchase}
         className="w-full glass-button text-white py-3 rounded-lg font-medium hover:opacity-90 transition-opacity"
       >
-        {purchaseType === PurchaseType.Cash ? 'Complete Cash Purchase' : 'Confirm Loan & Purchase'}
+        {purchaseType === PurchaseType.Cash
+          ? `Complete Cash Purchase (${quantity}) — ${formatCurrency(totalCost, currencyFormat)}`
+          : `Confirm Loan & Purchase (${quantity})`}
       </button>
     </div>
   );

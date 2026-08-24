@@ -8,6 +8,7 @@ import {
   type Loan
 } from '../types/game';
 import { getNewProductionAircraft, getLegacyAircraft } from '../data/aircraft-types';
+import { generateRegistrationForHub } from '../data/registrationPrefixes';
 import {
   refreshUsedMarketplace,
   getActiveListings as getActiveUsedListings
@@ -94,7 +95,8 @@ function mapMarketplaceIdToGameId(marketplaceId: string): string | null {
 
 interface PurchaseConfig {
   type: PurchaseType;
-  totalPriceUsd: number;
+  totalPriceUsd: number; // Price per aircraft
+  quantity?: number;     // Number of identical aircraft to purchase (default 1)
   downPaymentPercent?: number;
   loanTermMonths?: number;
   interestRatePercent?: number;
@@ -104,6 +106,7 @@ interface PurchaseResult {
   success: boolean;
   message: string;
   aircraftId?: string;
+  aircraftIds?: string[];
   loanId?: string;
 }
 
@@ -231,21 +234,23 @@ export const useFleetStore = create<FleetMarketplaceState>((set, get) => ({
       const playerCash = airline.finances.cash;
       const totalPrice = config.totalPriceUsd || listing.price;
 
-      // Generate aircraft ID early so we can link it to the loan
-      const newAircraftId = `aircraft-${Date.now()}`;
+      // Quantity of identical aircraft to buy. Used listings are single
+      // airframes (unique year/hours/condition), so they can only be
+      // purchased one at a time; new listings allow up to 20 per order.
+      const quantity = Math.max(1, Math.min(Math.round(config.quantity ?? 1), listing.isNew ? 20 : 1));
 
-      // Calculate upfront cash required based on purchase type
-      let cashRequired = 0;
+      // Calculate upfront cash required per aircraft based on purchase type
+      let cashRequiredPerAircraft = 0;
       if (config.type === 'Cash') {
-        cashRequired = totalPrice;
+        cashRequiredPerAircraft = totalPrice;
       } else if (config.type === 'Loan') {
         const downPaymentPercent = config.downPaymentPercent ?? 20;
-        cashRequired = Math.round(totalPrice * downPaymentPercent / 100);
+        cashRequiredPerAircraft = Math.round(totalPrice * downPaymentPercent / 100);
       }
 
       // Validate affordability BEFORE creating any loan, so a failed
       // purchase never leaves an orphaned loan inflating liabilities.
-      if (playerCash < cashRequired) {
+      if (playerCash < cashRequiredPerAircraft * quantity) {
         return {
           success: false,
           message: config.type === 'Cash'
@@ -263,58 +268,6 @@ export const useFleetStore = create<FleetMarketplaceState>((set, get) => ({
           message: 'Unable to process this aircraft type. Please try a different one.'
         };
       }
-
-      // Create the loan (only after all validation has passed)
-      let loanId: string | undefined;
-      if (config.type === 'Loan') {
-        const loanAmount = totalPrice - cashRequired;
-        const loanTermMonths = config.loanTermMonths ?? 60;
-        const interestRate = (config.interestRatePercent ?? 5.5) / 100;
-
-        // Calculate monthly payment using standard amortization formula
-        const monthlyRate = interestRate / 12;
-        let monthlyPayment: number;
-        if (monthlyRate === 0) {
-          monthlyPayment = loanAmount / loanTermMonths;
-        } else {
-          monthlyPayment = loanAmount * (monthlyRate * Math.pow(1 + monthlyRate, loanTermMonths)) / (Math.pow(1 + monthlyRate, loanTermMonths) - 1);
-        }
-
-        const startDate = new Date(gameState.currentDate);
-        const endDate = new Date(startDate);
-        endDate.setMonth(endDate.getMonth() + loanTermMonths);
-
-        const newLoan: Loan = {
-          id: `loan-${Date.now()}`,
-          amount: loanAmount,
-          interestRate: (config.interestRatePercent ?? 5.5),
-          monthlyPayment: Math.round(monthlyPayment),
-          remainingBalance: loanAmount,
-          startDate,
-          endDate,
-          aircraftId: newAircraftId // Link loan to this specific aircraft
-        };
-
-        // Update gameStore with new loan and reduced cash
-        useGameStore.setState((state) => {
-          if (!state.airline) return state;
-          return {
-            airline: {
-              ...state.airline,
-              finances: {
-                ...state.airline.finances,
-                loans: [...state.airline.finances.loans, newLoan],
-                liabilities: state.airline.finances.liabilities + loanAmount
-              }
-            }
-          };
-        });
-
-        loanId = newLoan.id;
-      }
-
-      // Generate registration number using airline's IATA code
-      const regNumber = `${airline.iataCode}${Math.floor(1000 + Math.random() * 9000)}`;
 
       // Determine manufacture year and flight hours based on listing type
       const currentYear = gameState.currentDate.getFullYear();
@@ -341,61 +294,110 @@ export const useFleetStore = create<FleetMarketplaceState>((set, get) => ({
         }
       }
 
-      // Create the new Aircraft record matching gameStore's expected format
+      // Create the aircraft records matching gameStore's expected format
       const now = gameState.currentDate;
       const maintenanceDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days from now
 
-      const newAircraft: Aircraft = {
-        id: newAircraftId, // Use the pre-generated ID so loan link matches
-        typeId: gameId,
-        registration: regNumber,
-        age: currentYear - (manufactureYear || currentYear),
-        condition,
-        manufactureYear: manufactureYear || currentYear,
-        status: 'available',
-        currentLocation: airline.headquarters,
-        assignedRoute: null,
-        totalFlightHours: initialFlightHours,
-        lastMaintenance: now,
-        nextMaintenance: maintenanceDate,
-        liveries: [],
-        currentLiveryIndex: 0
-      };
+      const loanAmountPerAircraft = totalPrice - cashRequiredPerAircraft;
+      const newAircrafts: Aircraft[] = [];
+      const newLoans: Loan[] = [];
+      const registrations: string[] = [];
 
-      // Update gameStore: add aircraft to fleet and deduct cash
+      for (let i = 0; i < quantity; i++) {
+        // Generate unique IDs so each aircraft can be linked to its own loan
+        const newAircraftId = `aircraft-${Date.now()}-${i}`;
+
+        // Create the loan (only after all validation has passed)
+        if (config.type === 'Loan') {
+          const loanTermMonths = config.loanTermMonths ?? 60;
+          const interestRate = (config.interestRatePercent ?? 5.5) / 100;
+
+          // Calculate monthly payment using standard amortization formula
+          const monthlyRate = interestRate / 12;
+          let monthlyPayment: number;
+          if (monthlyRate === 0) {
+            monthlyPayment = loanAmountPerAircraft / loanTermMonths;
+          } else {
+            monthlyPayment = loanAmountPerAircraft * (monthlyRate * Math.pow(1 + monthlyRate, loanTermMonths)) / (Math.pow(1 + monthlyRate, loanTermMonths) - 1);
+          }
+
+          const startDate = new Date(gameState.currentDate);
+          const endDate = new Date(startDate);
+          endDate.setMonth(endDate.getMonth() + loanTermMonths);
+
+          newLoans.push({
+            id: `loan-${Date.now()}-${i}`,
+            amount: loanAmountPerAircraft,
+            interestRate: (config.interestRatePercent ?? 5.5),
+            monthlyPayment: Math.round(monthlyPayment),
+            remainingBalance: loanAmountPerAircraft,
+            startDate,
+            endDate,
+            aircraftId: newAircraftId // Link loan to this specific aircraft
+          });
+        }
+
+        // Generate registration number based on the hub country's prefix scheme
+        const regNumber = generateRegistrationForHub(airline.headquarters, registrations);
+        registrations.push(regNumber);
+
+        newAircrafts.push({
+          id: newAircraftId, // Use the pre-generated ID so loan link matches
+          typeId: gameId,
+          registration: regNumber,
+          age: currentYear - (manufactureYear || currentYear),
+          condition,
+          manufactureYear: manufactureYear || currentYear,
+          status: 'available',
+          currentLocation: airline.headquarters,
+          assignedRoute: null,
+          totalFlightHours: initialFlightHours,
+          lastMaintenance: now,
+          nextMaintenance: maintenanceDate,
+          liveries: [],
+          currentLiveryIndex: 0
+        });
+      }
+
+      // Update gameStore: add all aircraft to fleet and deduct cash
       useGameStore.setState((state) => {
         if (!state.airline) return state;
-        const newCash = state.airline.finances.cash - cashRequired;
+        const newCash = state.airline.finances.cash - cashRequiredPerAircraft * quantity;
         return {
           airline: {
             ...state.airline,
-            fleet: [...state.airline.fleet, newAircraft],
+            fleet: [...state.airline.fleet, ...newAircrafts],
             finances: {
               ...state.airline.finances,
               cash: newCash,
               // The aircraft's full value is a new asset regardless of how it was paid for.
-              // (For loans the offsetting entry is the liability added above.)
-              assets: state.airline.finances.assets + totalPrice
+              // (For loans the offsetting entry is the liability added below.)
+              assets: state.airline.finances.assets + totalPrice * quantity,
+              ...(newLoans.length > 0 ? {
+                loans: [...state.airline.finances.loans, ...newLoans],
+                liabilities: state.airline.finances.liabilities + loanAmountPerAircraft * newLoans.length
+              } : {})
             }
           }
         };
       });
 
-      // Mark listing as purchased in fleetStore
+      // Mark the listing as purchased in fleetStore. New listings stay
+      // available for repeat purchases (they represent a type, not a single
+      // airframe); only used listings are consumed by a purchase.
       set((state) => ({
-        newAircraftListings: state.newAircraftListings.map(l =>
-          l.id === listingId ? { ...l, purchased: true } : l
-        ),
         usedAircraftListings: state.usedAircraftListings.map(l =>
           l.id === listingId ? { ...l, purchased: true } : l
         )
       }));
 
+      const aircraftIds = newAircrafts.map(a => a.id);
       return {
         success: true,
-        message: `Purchase successful! ${listing.isNew ? 'New' : 'Used'} aircraft acquired (${regNumber}).`,
-        aircraftId: newAircraft.id,
-        loanId
+        message: `Purchase successful! ${quantity} ${listing.isNew ? 'new' : 'used'} aircraft acquired (${registrations.join(', ')}).`,
+        aircraftId: aircraftIds[0],
+        aircraftIds,
+        loanId: newLoans[0]?.id
       };
     } catch (error) {
       console.error('Purchase failed:', error);

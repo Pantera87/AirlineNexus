@@ -22,6 +22,7 @@ const menuItems: MenuItem[] = [
   { id: 'operations', label: 'Operations', icon: 'operations' },
   { id: 'alliances', label: 'Alliances', icon: 'alliances' },
   { id: 'world', label: 'World View', icon: 'world' },
+  { id: 'notifications', label: 'Notifications', icon: 'notifications' },
   { id: 'settings', label: 'Settings', icon: 'settings' },
 ];
 

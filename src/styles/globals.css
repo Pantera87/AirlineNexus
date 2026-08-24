@@ -1,5 +1,33 @@
 @import "tailwindcss";
 
+/* Custom theme tokens (Tailwind v4 — these replace the values that used to live in tailwind.config.js,
+   which is NOT auto-loaded by Tailwind v4) */
+@theme {
+  /* Aviation-inspired runway palette (slate-based neutrals) */
+  --color-runway-50: #f8fafc;
+  --color-runway-100: #f1f5f9;
+  --color-runway-200: #e2e8f0;
+  --color-runway-300: #cbd5e1;
+  --color-runway-400: #94a3b8;
+  --color-runway-500: #64748b;
+  --color-runway-600: #475569;
+  --color-runway-700: #334155;
+  --color-runway-800: #1e293b;
+  --color-runway-900: #0f172a;
+
+  /* Cockpit surfaces */
+  --color-cockpit-bg: #0a0e1a;
+  --color-cockpit-panel: #111827;
+  --color-cockpit-accent: #3b82f6;
+  --color-cockpit-success: #10b981;
+  --color-cockpit-warning: #f59e06;
+  --color-cockpit-danger: #ef4444;
+
+  /* Fonts */
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
 /* Base styles */
 :root {
   font-family: Inter, system-ui, sans-serif;
@@ -39,6 +67,15 @@ body {
   backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 0.75rem;
+}
+
+/* Hide scrollbars (replaces the tailwind-scrollbar-hide plugin, which is not loaded in Tailwind v4) */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
 }
 
 .card-hover {
@@ -187,6 +224,12 @@ body {
 .input-field:focus {
   box-shadow: 0 0 0 2px #0ea5e9;
   border-color: #0ea5e9;
+}
+
+/* Input with a leading icon. Defined outside cascade layers (and after .input-field)
+   so it beats the padding shorthand — Tailwind v4 utilities are layered and would lose. */
+.input-icon-left {
+  padding-left: 2.25rem; /* equivalent to pl-9 */
 }
 
 /* Badge styles */

@@ -1,28 +1,16 @@
 import { Canvas, useFrame } from '@react-three/fiber'
 import { Stars, Line, useTexture, OrbitControls } from '@react-three/drei'
 import { useRef, useMemo } from 'react'
-import { ShaderMaterial, Vector3, Mesh, Group, DirectionalLight } from 'three'
+import { ShaderMaterial, Vector3, Group, DirectionalLight } from 'three'
 import { useGameStore } from '@/store/gameStore'
 import type { Aircraft, Route, Airport } from '@/types/game'
 import { AIRPORT_DATABASE } from '@/data/airports'
 import earthVertShader from '@/shaders/earthDayNight.vert?raw'
 import earthFragShader from '@/shaders/earthDayNight.frag?raw'
+import { GLOBE_RADIUS, latLonToPosition } from '@/components/world/geo'
 
-const GLOBE_RADIUS = 45
 const SUN_DISTANCE = 200
 const AXIAL_TILT_BASE = 23.44 * (Math.PI / 180) // 23.44 degrees in radians
-
-// Convert lat/lon to 3D position on the globe surface
-function latLonToPosition(lat: number, lon: number, radius: number = GLOBE_RADIUS): [number, number, number] {
-  const phi = (90 - lat) * (Math.PI / 180)
-  const theta = (lon + 180) * (Math.PI / 180)
-  
-  const x = radius * Math.sin(phi) * Math.cos(theta)
-  const y = radius * Math.cos(phi)
-  const z = radius * Math.sin(phi) * Math.sin(theta)
-  
-  return [x, y, z]
-}
 
 // Get day of year (1-365)
 function getDayOfYear(date: Date): number {
@@ -145,9 +133,10 @@ function Sun({ lightRef }: { lightRef: React.RefObject<DirectionalLight | null> 
   )
 }
 
-// Earth component with day/night shader
-function Earth() {
-  const meshRef = useRef<Mesh>(null)
+// Earth component with day/night shader.
+// Daily spin and axial tilt are applied to the shared globe group (passed in)
+// so airport pins, aircraft and route arcs stay locked to the surface.
+function Earth({ globeGroupRef }: { globeGroupRef: React.RefObject<Group | null> }) {
   const currentDate = useGameStore(state => state.currentDate)
   const gameSpeed = useGameStore(state => state.gameSpeed)
 
@@ -190,7 +179,7 @@ function Earth() {
 
   // Update globe rotation based on game time and speed
   useFrame((state, delta) => {
-    if (!meshRef.current) return
+    if (!globeGroupRef.current) return
     
     const speedMultiplier = getSpeedMultiplier(gameSpeed)
     
@@ -214,9 +203,10 @@ function Earth() {
     const dayOfYear = getDayOfYear(currentDate)
     const axialTilt = getSeasonalAxialTilt(dayOfYear)
 
-    // Apply rotation: Y rotation for Earth's daily spin, X rotation for axial tilt
-    meshRef.current.rotation.y = accumulatedRotationRef.current
-    meshRef.current.rotation.x = axialTilt
+    // Apply rotation to the shared globe group (Earth + pins + aircraft + routes)
+    // Y rotation for Earth's daily spin, X rotation for axial tilt
+    globeGroupRef.current.rotation.y = accumulatedRotationRef.current
+    globeGroupRef.current.rotation.x = axialTilt
 
     // Smoothly advance sun angle for shader so shadows move continuously.
     const sunAngleSpeed = (2 * Math.PI) / 86400
@@ -243,7 +233,7 @@ function Earth() {
   }
   
   return (
-    <mesh ref={meshRef}>
+    <mesh>
       <sphereGeometry args={[GLOBE_RADIUS, 64, 64]} />
       <primitive object={shaderMaterial} attach="material" />
     </mesh>
@@ -295,27 +285,35 @@ function SimpleAircraft({
   )
 }
 
-// Flight route component
-function FlightRoute({ 
-  route, 
-  airports 
-}: { 
-  route: Route, 
-  airports: Airport[]
-}) {
-  const points: [number, number, number][] = []
-  
-  const origin = airports.find(a => a.iata === route.origin)
-  const destination = airports.find(a => a.iata === route.destination)
-  
-  if (origin && destination) {
-    const originPos = latLonToPosition(origin.latitude, origin.longitude)
-    const destPos = latLonToPosition(destination.latitude, destination.longitude)
-    
-    points.push(originPos as [number, number, number])
-    points.push(destPos as [number, number, number])
-  }
-  
+// Great-circle arc between two airports, lifted above the globe surface.
+function RouteArc({ from, to }: { from: Airport; to: Airport }) {
+  const points = useMemo(() => {
+    const v1 = new Vector3(...latLonToPosition(from.latitude, from.longitude, 1))
+    const v2 = new Vector3(...latLonToPosition(to.latitude, to.longitude, 1))
+    const omega = Math.acos(Math.min(1, Math.max(-1, v1.dot(v2))))
+    // Arc height scales with the central angle so long-haul legs arch higher.
+    const maxLift = GLOBE_RADIUS * (0.03 + 0.15 * (omega / Math.PI))
+    const steps = 32
+    const pts: [number, number, number][] = []
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps
+      let p: Vector3
+      if (omega < 1e-6) {
+        p = v1.clone()
+      } else {
+        // Slerp between the two unit vectors.
+        const a = Math.sin((1 - t) * omega) / Math.sin(omega)
+        const b = Math.sin(t * omega) / Math.sin(omega)
+        p = v1.clone().multiplyScalar(a).add(v2.clone().multiplyScalar(b))
+      }
+      const lift = maxLift * Math.sin(Math.PI * t) // endpoints sit on the surface
+      pts.push(p.multiplyScalar(GLOBE_RADIUS + lift).toArray() as [number, number, number])
+    }
+    return pts
+  }, [from, to])
+
+  if (points.length < 2) return null
+
   return (
     <Line
       points={points}
@@ -326,10 +324,47 @@ function FlightRoute({
   )
 }
 
+
+// Flight route component — draws one arc per leg of the closed loop, including the return to hub.
+function FlightRoute({ 
+  route, 
+  airports 
+}: { 
+  route: Route, 
+  airports: Airport[]
+}) {
+  const pathIatas = [route.origin, ...(route.stops ?? []), route.destination]
+  
+  // Resolve every airport in the chain (skipping any missing from the database).
+  const resolved = pathIatas
+    .map((iata) => airports.find((a) => a.iata === iata))
+    .filter((a): a is Airport => Boolean(a))
+
+  const legs: [Airport, Airport][] = []
+  for (let i = 0; i < resolved.length - 1; i++) {
+    legs.push([resolved[i], resolved[i + 1]])
+  }
+  // Close the loop back to the hub.
+  if (resolved.length > 1 && resolved[resolved.length - 1].iata !== resolved[0].iata) {
+    legs.push([resolved[resolved.length - 1], resolved[0]])
+  }
+
+  return (
+    <group>
+      {legs.map(([a, b], i) => (
+        <RouteArc key={`${route.id}-leg-${i}`} from={a} to={b} />
+      ))}
+    </group>
+  )
+}
+
 // Main WorldView component
 const WorldView = () => {
   const { airline } = useGameStore()
   const sunLightRef = useRef<DirectionalLight>(null)
+  // Shared rotation group: the Earth mesh and everything placed on its surface
+  // (airport pins, aircraft, route arcs) all rotate together with game time.
+  const globeGroupRef = useRef<Group>(null)
   
   if (!airline || !airline.fleet || !airline.routes) {
     return (
@@ -362,26 +397,29 @@ const WorldView = () => {
         {/* Subtle ambient light so dark side of scene isn't completely black */}
         <ambientLight intensity={0.05} />
         
-        {/* Earth with day/night shader */}
-        <Earth />
+        {/* Shared globe group: everything placed via latLonToPosition rotates with the Earth */}
+        <group ref={globeGroupRef}>
+          {/* Earth with day/night shader */}
+          <Earth globeGroupRef={globeGroupRef} />
 
-        {/* Render Aircraft */}
-        {aircrafts.map((aircraft) => (
-          <SimpleAircraft 
-            key={aircraft.id} 
-            aircraft={aircraft} 
-            airports={airports}
-          />
-        ))}
+          {/* Render Aircraft (pinned at their current airport's coordinates) */}
+          {aircrafts.map((aircraft) => (
+            <SimpleAircraft 
+              key={aircraft.id} 
+              aircraft={aircraft} 
+              airports={airports}
+            />
+          ))}
 
-        {/* Render Routes */}
-        {routes.map((route) => (
-          <FlightRoute 
-            key={route.id} 
-            route={route} 
-            airports={airports}
-          />
-        ))}
+          {/* Render Routes */}
+          {routes.map((route) => (
+            <FlightRoute 
+              key={route.id} 
+              route={route} 
+              airports={airports}
+            />
+          ))}
+        </group>
 
         <OrbitControls enablePan={true} makeDefault />
       </Canvas>

@@ -173,16 +173,23 @@ export type AirportSize = 'small' | 'medium' | 'large' | 'hub';
 
 export interface Route {
   id: string;
-  origin: string; // airport IATA
-  destination: string; // airport IATA
+  origin: string; // airport IATA — always the airline's hub
+  destination: string; // airport IATA — last airport before returning to the hub
+  stops?: string[]; // intermediate airports in flight order (multi-hop loop), e.g. ['LHR','CDG'] → HUB→LHR→CDG→DEST→HUB
   isActive: boolean;
-  frequency: number; // flights per week
+  frequency: number; // round trips (cycles) per week, capped by aircraft cycle time (see routeEngine.maxFrequencyPerWeek)
   aircraftId: string;
   schedule: FlightSchedule[];
   avgLoadFactor: number; // 0-1
   revenue: number; // weekly
   cost: number; // weekly
   profitability: number; // profit margin
+
+  // Route physics & demand (computed at creation via routeEngine)
+  distanceNm?: number; // great-circle distance in nautical miles
+  flightTimeMin?: number; // estimated block time in minutes
+  demandScore?: number; // 0-100 attractiveness score
+  weeksActive?: number; // weeks the route has been operating (drives load-factor ramp-up)
 }
 
 export interface FlightSchedule {
@@ -359,8 +366,14 @@ export interface GameState {
 export type GameSpeed = 'paused' | 'normal' | 'fast' | 'fastest';
 export type Difficulty = 'easy' | 'normal' | 'hard' | 'realistic';
 
+export interface FuelPricePoint {
+  date: string; // ISO date of the weekly price update
+  price: number; // USD per kg
+}
+
 export interface WorldState {
   fuelPrice: number; // per kg
+  fuelPriceHistory: FuelPricePoint[]; // most recent last, capped at ~2 years of weekly points
   economicIndex: number; // 0-100
   travelDemand: number; // 0-100
   competitorAirlines: CompetitorAirline[];
@@ -413,12 +426,14 @@ export type Screen =
   | 'fleet'
   | 'routes'
   | 'finances'
+  | 'fuel'
   | 'staff'
   | 'operations'
   | 'alliances'
   | 'events'
   | 'world'
-  | 'settings';
+  | 'settings'
+  | 'notifications';
 
 export interface MenuItem {
   id: Screen;
