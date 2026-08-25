@@ -259,7 +259,7 @@ function SimpleAircraft({
     position[2] = pos[2]
   }
   
-  let color = '#ffffff'
+  let color: string | null = '#ffffff'
   switch (aircraft.status) {
     case 'in-flight':
       color = '#00ffff'
@@ -267,8 +267,10 @@ function SimpleAircraft({
     case 'maintenance':
       color = '#ff0000'
       break
+    // Available aircraft don't get a marker: the green box sat unrotated on
+    // the surface and read as a stray artifact poking out of the globe.
     case 'available':
-      color = '#00ff00'
+      color = null
       break
     case 'parked':
       color = '#ffff00'
@@ -276,6 +278,8 @@ function SimpleAircraft({
     default:
       color = '#ffffff'
   }
+
+  if (color === null) return null
 
   return (
     <mesh position={position}>

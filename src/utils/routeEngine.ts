@@ -388,14 +388,17 @@ export const FREQUENCY_OPTIONS: { value: number; label: string }[] = [1, 2, 3, 4
 /** Frequency options for a loop — same labels as point-to-point but driven by the full cycle time. */
 export function buildLoopFrequencyOptions(path: Airport[], aircraft?: AircraftType): { value: number; label: string }[] {
   if (!aircraft) return FREQUENCY_OPTIONS;
-  const max = maxLoopCyclesPerDay(path, aircraft);
-  return FREQUENCY_OPTIONS.filter((f) => f.value <= max);
+  // Weekly values (d*7) must be compared against a weekly cap, not raw cycles/day.
+  const maxWeekly = 7 * maxLoopCyclesPerDay(path, aircraft);
+  return FREQUENCY_OPTIONS.filter((f) => f.value <= maxWeekly);
 }
 
 /** Max weekly frequency for a loop (capped by the available schedule options). */
 export function maxLoopFrequencyPerWeek(path: Airport[], aircraft?: AircraftType): number {
   if (!aircraft) return FREQUENCY_OPTIONS[FREQUENCY_OPTIONS.length - 1].value;
-  return Math.min(maxLoopCyclesPerDay(path, aircraft), FREQUENCY_OPTIONS[FREQUENCY_OPTIONS.length - 1].value);
+  // Weekly cap = cycles/day × 7 (previously returned raw cycles/day, which silently
+  // clamped saved weekly frequencies down to a fraction of the selected value).
+  return Math.min(7 * maxLoopCyclesPerDay(path, aircraft), FREQUENCY_OPTIONS[FREQUENCY_OPTIONS.length - 1].value);
 }
 
 export interface LegRangeCheck {

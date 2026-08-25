@@ -232,6 +232,8 @@ export interface Finances {
   assets: number;
   liabilities: number;
   netWorth: number;
+  /** Weekly operations plan currently being accrued continuously (recomputed at each week boundary and on route/fleet changes). */
+  weeklyPlan?: { revenue: number; costs: number };
   monthlyReports: MonthlyReport[];
   loans: Loan[];
   investments: Investment[];

@@ -37,7 +37,12 @@ import {
   getLoopCycleMinutes,
   previewLoopEconomics,
 } from '@/utils/routeEngine';
+import { computeDispatchPlan } from '@/utils/fleetDispatcher';
+import type { RouteStaffing } from '@/utils/fleetDispatcher';
 import { GameTimeRepository } from '@/database/repositories/gameTime.repository';
+
+// In-game milliseconds per week (one in-game day is 24 hours of simulated time).
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Resolve a route's full loop path (HUB → stops… → DEST) to airport objects, or null if any IATA is unknown. */
 function resolveRoutePathAirports(route: Route): Airport[] | null {
@@ -140,6 +145,12 @@ interface GameStore extends GameState {
   // Aircraft management
   purchaseAircraft: (typeId: string) => boolean;
   sellAircraft: (aircraftId: string, salePrice?: number) => { success: boolean; message: string };
+  /**
+   * Automatic fleet dispatch: assigns aircraft from the shared per-type pool to
+   * active routes (sticky + free-pool fill), repositions/releases as needed,
+   * charges one-time positioning costs, and refreshes the weekly plan.
+   */
+  dispatchFleet: () => { dispatched: number; released: number; shortfalls: RouteStaffing[]; totalPositionCost: number } | null;
 
   // Loan management
   payoffLoan: (loanId: string) => { success: boolean; message: string };
@@ -160,13 +171,22 @@ interface GameStore extends GameState {
   // Hub policy enforcement — cancels legacy routes that don't originate at the hub.
   enforceHubRoutes: () => number;
 
-  // Weekly route economics settlement (Phase 4b) — called by the game loop on week boundaries.
-  settleWeeklyRoutes: () => {
+  // Weekly operations plan (Phase 4b) — recomputes this week's projected revenue/costs via the
+  // route engine and stores them in finances.weeklyPlan. Does NOT apply a lump sum to cash:
+  // the game loop streams it into cash continuously via accrueFinances() as time passes.
+  // At real week boundaries (default) it also advances the load-factor ramp, moves the fuel
+  // market, and notifies; mid-week refreshes pass { boundary: false }.
+  settleWeeklyRoutes: (options?: { boundary?: boolean }) => {
     settledRoutes: number;
     totalRevenue: number;
     totalCosts: number;
     totalProfit: number;
   } | null;
+
+  // Continuous cash accrual (Phase 4b) — called by the game loop every tick with the elapsed
+  // in-game milliseconds since the last tick, applying that fraction of the current weekly
+  // plan to cash/revenue/expenses.
+  accrueFinances: (gameMsAdvanced: number) => void;
 
   // Monthly loan servicing (Phase 4c) — called by the game loop on month boundaries.
   settleMonthlyLoans: () => { settledPayments: number; totalPaid: number } | null;
@@ -433,6 +453,10 @@ export const useGameStore = create<GameStore>()(
           },
         });
 
+        // New airframe joins the shared pool → re-dispatch (it may cover a short-staffed
+        // route) and refresh the continuous accrual plan immediately.
+        get().dispatchFleet();
+
         return true;
       },
 
@@ -473,18 +497,14 @@ export const useGameStore = create<GameStore>()(
           return { success: false, message: 'Unable to determine sale price for this aircraft' };
         }
 
-        // Single atomic update: unassign from routes (if needed), remove the
-        // aircraft from the fleet and apply the financial effects. Using one set()
-        // avoids a stale-state overwrite where the second update would clobber
-        // the route unassignment done by the first.
-        const updatedRoutes = aircraft.assignedRoute
-          ? airline.routes.map((r) => (r.aircraftId === aircraft.id ? { ...r, aircraftId: '' } : r))
-          : airline.routes;
-
+        // Single atomic update: remove the aircraft from the fleet and apply the
+        // financial effects. Routes keep their type id — dispatchFleet() below
+        // re-evaluates the shared pool around the missing airframe. (The old code
+        // compared r.aircraftId === aircraft.id, but routes store a TYPE id, so it
+        // never matched.)
         set({
           airline: {
             ...airline,
-            routes: updatedRoutes,
             fleet: airline.fleet.filter((a) => a.id !== aircraftId),
             finances: {
               ...airline.finances,
@@ -496,9 +516,103 @@ export const useGameStore = create<GameStore>()(
           },
         });
 
+        // Fleet size changed → re-dispatch (releases/reassigns around the missing aircraft)
+        // and refresh the continuous accrual plan immediately.
+        get().dispatchFleet();
+
         return {
           success: true,
           message: `${aircraft.registration} sold for ${formatCurrency(finalSalePrice, currency)}`,
+        };
+      },
+
+      // Automatic fleet dispatch — planning logic lives in utils/fleetDispatcher.ts.
+      // Routes reference an AIRCRAFT TYPE (route.aircraftId = type id); the physical
+      // airframes covering a route come from the shared per-type pool. This action is
+      // idempotent: when nothing changed it only refreshes the weekly plan.
+      dispatchFleet: () => {
+        const state = get();
+        const airline = state.airline;
+        if (!airline) return null;
+
+        const plan = computeDispatchPlan({
+          hubIata: airline.headquarters,
+          routes: airline.routes,
+          fleet: airline.fleet,
+          resolvePath: (r) => resolveRoutePathAirports(r),
+          fuelPricePerKg: state.world.fuelPrice,
+          cash: airline.finances.cash,
+        });
+
+        if (!plan.changed) {
+          // No assignments moved — still refresh the plan so economics track staffing.
+          get().settleWeeklyRoutes({ boundary: false });
+          return { dispatched: 0, released: 0, shortfalls: plan.shortfalls, totalPositionCost: 0 };
+        }
+
+        // Single atomic update: apply assignment/positioning changes and charge the
+        // one-time positioning costs (one-off operating expense).
+        set({
+          airline: {
+            ...airline,
+            fleet: airline.fleet.map((a) => {
+              if (!plan.assignments.has(a.id)) return a;
+              const target = plan.assignments.get(a.id)!;
+              return {
+                ...a,
+                assignedRoute: target,
+                // Deployed airframes are based at the hub (every loop starts/ends there);
+                // released ones return to the hub pool. Live in-flight positions belong
+                // to the future simulation layer and will overwrite these per cycle.
+                status: (target ? 'in-flight' : 'available') as Aircraft['status'],
+                currentLocation: airline.headquarters,
+              };
+            }),
+            finances:
+              plan.totalPositionCost > 0
+                ? {
+                    ...airline.finances,
+                    cash: airline.finances.cash - plan.totalPositionCost,
+                    totalExpenses: airline.finances.totalExpenses + plan.totalPositionCost,
+                    netWorth: airline.finances.netWorth - plan.totalPositionCost,
+                  }
+                : airline.finances,
+          },
+        });
+
+        // Staffing changed → refresh the continuous accrual plan immediately.
+        get().settleWeeklyRoutes({ boundary: false });
+
+        const currency = state.settings.currencyFormat;
+        if (state.settings.notificationsEnabled) {
+          const parts: string[] = [];
+          if (plan.dispatchedCount > 0) parts.push(`${plan.dispatchedCount} aircraft deployed`);
+          if (plan.releasedCount > 0) parts.push(`${plan.releasedCount} returned to the pool`);
+          if (plan.totalPositionCost > 0) parts.push(`positioning cost ${formatCurrency(plan.totalPositionCost, currency)}`);
+          const hasShortfall = plan.shortfalls.length > 0;
+          get().addNotification({
+            type: hasShortfall ? 'warning' : 'success',
+            title: hasShortfall ? 'Fleet short-staffed' : 'Fleet dispatched',
+            message:
+              `Automatic dispatch: ${parts.join(', ')}.` +
+              (hasShortfall
+                ? ` Short-staffed routes: ${plan.shortfalls
+                    .map((s) => {
+                      const route = airline.routes.find((r) => r.id === s.routeId);
+                      const label = route ? getRoutePath(route).join('→') : s.routeId;
+                      const typeName = AIRCRAFT_DATABASE.find((t) => t.id === s.typeId)?.name ?? s.typeId;
+                      return `${label} ${s.staffed}/${s.required}× ${typeName}`;
+                    })
+                    .join('; ')}.`
+                : ''),
+          });
+        }
+
+        return {
+          dispatched: plan.dispatchedCount,
+          released: plan.releasedCount,
+          shortfalls: plan.shortfalls,
+          totalPositionCost: plan.totalPositionCost,
         };
       },
 
@@ -731,6 +845,9 @@ export const useGameStore = create<GameStore>()(
           },
         });
 
+        // New route may need aircraft → re-dispatch and refresh the plan immediately.
+        get().dispatchFleet();
+
         return true;
       },
 
@@ -753,6 +870,10 @@ export const useGameStore = create<GameStore>()(
           const type = findAircraftById(aircraftType);
           if (!type) return false;
           next.aircraftId = aircraftType;
+          // The new type must fit EVERY leg of the loop — otherwise the route could
+          // never operate, so reject the change instead of persisting a broken state.
+          const feasibilityPath = resolveRoutePathAirports(next);
+          if (feasibilityPath && !checkLoopRange(type, feasibilityPath).feasible) return false;
           // Recompute block time for the new aircraft on this route.
           const pathAirports = resolveRoutePathAirports(next);
           if (pathAirports && (next.stops?.length ?? 0) > 0) {
@@ -788,6 +909,9 @@ export const useGameStore = create<GameStore>()(
           },
         });
 
+        // Type/frequency may have changed → re-dispatch (rebalance the pool) and refresh.
+        get().dispatchFleet();
+
         return true;
       },
 
@@ -804,6 +928,9 @@ export const useGameStore = create<GameStore>()(
             routes: airline.routes.filter((r) => r.id !== routeId),
           },
         });
+
+        // Freed capacity returns to the pool → re-dispatch and refresh finances.
+        get().dispatchFleet();
 
         return true;
       },
@@ -824,6 +951,10 @@ export const useGameStore = create<GameStore>()(
           },
         });
 
+        // Re-plan so revenue reflects only hub-based operations (and re-dispatch,
+        // since the cancelled routes' aircraft return to the pool).
+        get().dispatchFleet();
+
         get().addNotification({
           title: 'Hub network policy applied',
           message: `${nonCompliant.length} route${nonCompliant.length > 1 ? 's' : ''} cancelled — all routes must now begin and end at your hub (${airline.headquarters}).`,
@@ -833,17 +964,26 @@ export const useGameStore = create<GameStore>()(
         return nonCompliant.length;
       },
 
-      // Weekly route economics settlement (Phase 4b)
-      settleWeeklyRoutes: () => {
+      // Weekly operations plan (Phase 4b) — recomputes this week's projected revenue/costs via the
+      // route engine and stores them in finances.weeklyPlan. Does NOT apply a lump sum to cash:
+      // the game loop streams it into cash continuously via accrueFinances() as time passes.
+      // At real week boundaries (default) it also advances the load-factor ramp, moves the fuel
+      // market, and notifies; mid-week refreshes pass { boundary: false }.
+      settleWeeklyRoutes: (options?) => {
+        const boundary = options?.boundary !== false;
         const state = get();
         const airline = state.airline;
         if (!airline) return null;
 
-        // Update the fuel market first so this week's settlement uses the current price.
-        get().updateFuelPrice();
+        // At a real week boundary, move the fuel market first so this week's plan uses the current price.
+        if (boundary) get().updateFuelPrice();
         const fuelPricePerKg = get().world.fuelPrice;
 
-        if (airline.routes.length === 0) return null;
+        // No routes at all: nothing operates, so stream no cash and clear any stale plan.
+        if (airline.routes.length === 0) {
+          set({ airline: { ...airline, finances: { ...airline.finances, weeklyPlan: { revenue: 0, costs: 0 } } } });
+          return null;
+        }
 
         const currency = state.settings.currencyFormat;
         let totalRevenue = 0;
@@ -857,10 +997,14 @@ export const useGameStore = create<GameStore>()(
         );
 
         // Aircraft utilization: total weekly CYCLE hours needed per type (both legs + turnarounds)
-        // vs. fleet capacity of DAILY_DUTY_HOURS per aircraft per day.
-        const ownedCountByType = new Map<string, number>();
+        // vs. fleet capacity of DAILY_DUTY_HOURS per aircraft per day. Only USABLE airframes
+        // (available or in-flight) count toward capacity — grounded/maintenance/parked/unsold
+        // aircraft cannot fly, so a fully grounded type earns nothing this week.
+        const usableCountByType = new Map<string, number>();
         for (const ac of airline.fleet ?? []) {
-          ownedCountByType.set(ac.typeId, (ownedCountByType.get(ac.typeId) ?? 0) + 1);
+          if (ac.status === 'available' || ac.status === 'in-flight') {
+            usableCountByType.set(ac.typeId, (usableCountByType.get(ac.typeId) ?? 0) + 1);
+          }
         }
         const neededHoursByType = new Map<string, number>();
         for (const route of airline.routes) {
@@ -878,8 +1022,12 @@ export const useGameStore = create<GameStore>()(
         const utilizationFactor = (typeId: string): number => {
           const needed = neededHoursByType.get(typeId) ?? 0;
           if (needed <= 0) return 1;
-          // At least one aircraft is assumed available per scheduled type.
-          const capacity = Math.max(1, ownedCountByType.get(typeId) ?? 1) * DAILY_DUTY_HOURS * 7;
+          // The shared pool of usable airframes must cover the combined workload of all
+          // routes of this type; when it can't, operations scale down proportionally —
+          // and with zero usable aircraft the type simply doesn't operate.
+          const usable = usableCountByType.get(typeId) ?? 0;
+          if (usable === 0) return 0;
+          const capacity = usable * DAILY_DUTY_HOURS * 7;
           return Math.min(1, capacity / needed);
         };
 
@@ -891,20 +1039,20 @@ export const useGameStore = create<GameStore>()(
           const aircraftType = findAircraftById(route.aircraftId);
           if (!originAirport || !destAirport || !aircraftType) return route;
 
-          // Settle one week of operations using the route engine's economics model.
+          // Project one week of operations using the route engine's economics model.
           // Load factor ramps up with weeks in service, is reduced by competition and nudged by reputation.
-          const weeksActive = (route.weeksActive ?? 0) + 1;
-          // Closed hub loop: settle every leg of HUB → stops… → DEST → HUB each cycle.
+          const weeksSoFar = route.weeksActive ?? 0;
+          // Closed hub loop: project every leg of HUB → stops… → DEST → HUB each cycle.
           // Falls back to the legacy point-to-point model if any airport in the path is unknown.
           const pathAirports = resolveRoutePathAirports(route);
           const economics = pathAirports
             ? previewLoopEconomics(pathAirports, aircraftType, route.frequency, fuelPricePerKg, {
-                weeksActive: weeksActive - 1, // ramp-up based on how long the route has been operating so far
+                weeksActive: weeksSoFar, // ramp-up based on how long the route has been operating so far
                 competitionShare,
                 reputation: airline.reputation ?? 50,
               })
             : previewRouteEconomics(originAirport, destAirport, aircraftType, route.frequency, fuelPricePerKg, {
-                weeksActive: weeksActive - 1, // ramp-up based on how long the route has been operating so far
+                weeksActive: weeksSoFar, // ramp-up based on how long the route has been operating so far
                 competitionShare,
                 reputation: airline.reputation ?? 50,
               });
@@ -917,7 +1065,12 @@ export const useGameStore = create<GameStore>()(
           totalCosts += costs;
           settledRoutes++;
 
-          // Smooth the load factor toward the engine estimate (exponential moving average)
+          // Mid-week refresh: keep the card's projected numbers current without touching the ramp.
+          if (!boundary) {
+            return { ...route, revenue, cost: costs, profitability: revenue - costs };
+          }
+
+          // Week boundary: smooth the load factor toward the engine estimate and advance the ramp.
           const prevLoadFactor = route.avgLoadFactor || 0;
           const avgLoadFactor =
             prevLoadFactor === 0 ? economics.estLoadFactor : prevLoadFactor * 0.7 + economics.estLoadFactor * 0.3;
@@ -928,7 +1081,7 @@ export const useGameStore = create<GameStore>()(
             cost: costs,
             profitability: revenue - costs,
             avgLoadFactor,
-            weeksActive: Math.min(weeksActive, 104), // cap so the ramp-up saturates
+            weeksActive: Math.min(weeksSoFar + 1, 104), // cap so the ramp-up saturates
           };
         });
 
@@ -941,30 +1094,67 @@ export const useGameStore = create<GameStore>()(
 
         const totalProfit = totalRevenue - totalCosts;
 
+        // Store the plan so accrueFinances() can stream this week's economics into cash.
+        // No lump-sum cash change happens here — cash now moves continuously per tick.
         set({
           airline: {
             ...airline,
             routes: updatedRoutes,
             finances: {
               ...airline.finances,
-              cash: airline.finances.cash + totalProfit,
-              totalRevenue: airline.finances.totalRevenue + totalRevenue,
-              totalExpenses: airline.finances.totalExpenses + totalCosts,
-              profit: airline.finances.profit + totalProfit,
-              netWorth: airline.finances.netWorth + totalProfit,
+              weeklyPlan: { revenue: totalRevenue, costs: totalCosts },
             },
           },
         });
 
-        if (state.settings.notificationsEnabled && settledRoutes > 0) {
+        if (boundary && state.settings.notificationsEnabled && settledRoutes > 0) {
           get().addNotification({
             type: totalProfit >= 0 ? 'success' : 'warning',
-            title: 'Weekly operations report',
-            message: `${settledRoutes} route${settledRoutes === 1 ? '' : 's'} settled — revenue ${formatCurrency(totalRevenue, currency)}, costs (incl. fleet fixed costs) ${formatCurrency(totalCosts, currency)}, net ${totalProfit >= 0 ? 'profit' : 'loss'} of ${formatCurrency(Math.abs(totalProfit), currency)}.`,
+            title: 'Weekly operations plan',
+            message: `${settledRoutes} route${settledRoutes === 1 ? '' : 's'} in operation — projected weekly revenue ${formatCurrency(totalRevenue, currency)}, costs (incl. fleet fixed costs) ${formatCurrency(totalCosts, currency)}, net ${totalProfit >= 0 ? 'profit' : 'loss'} of ${formatCurrency(Math.abs(totalProfit), currency)}. Cash accrues continuously as time passes.`,
           });
         }
 
         return { settledRoutes, totalRevenue, totalCosts, totalProfit };
+      },
+
+      // Continuous cash accrual (Phase 4b) — called by the game loop every tick with the in-game
+      // milliseconds that elapsed since the last tick. Applies that fraction of the current weekly
+      // plan to cash/revenue/expenses so they move as days pass instead of jumping at week boundaries.
+      accrueFinances: (gameMsAdvanced) => {
+        if (!(gameMsAdvanced > 0)) return;
+        let airline = get().airline;
+        if (!airline) return;
+
+        // Lazy initialization: fresh saves have no plan yet — compute one without boundary side effects.
+        let plan = airline.finances.weeklyPlan;
+        if (!plan) {
+          get().settleWeeklyRoutes({ boundary: false });
+          airline = get().airline;
+          if (!airline) return;
+          plan = airline.finances.weeklyPlan;
+          if (!plan) return;
+        }
+        if (plan.revenue === 0 && plan.costs === 0) return;
+
+        const fraction = Math.min(gameMsAdvanced, WEEK_MS) / WEEK_MS; // clamp so a huge tick can't accrue more than one week
+        const revenue = plan.revenue * fraction;
+        const costs = plan.costs * fraction;
+        const net = revenue - costs;
+
+        set({
+          airline: {
+            ...airline,
+            finances: {
+              ...airline.finances,
+              cash: airline.finances.cash + net,
+              totalRevenue: airline.finances.totalRevenue + revenue,
+              totalExpenses: airline.finances.totalExpenses + costs,
+              profit: airline.finances.profit + net,
+              netWorth: airline.finances.netWorth + net,
+            },
+          },
+        });
       },
 
       // Monthly loan servicing (Phase 4c) — deducts each active loan's monthly payment.

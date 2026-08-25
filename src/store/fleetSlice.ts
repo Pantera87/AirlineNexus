@@ -382,6 +382,10 @@ export const useFleetStore = create<FleetMarketplaceState>((set, get) => ({
         };
       });
 
+      // New airframe joins the shared pool → re-dispatch (it may cover a short-staffed
+      // route) and refresh the continuous accrual plan immediately.
+      useGameStore.getState().dispatchFleet();
+
       // Mark the listing as purchased in fleetStore. New listings stay
       // available for repeat purchases (they represent a type, not a single
       // airframe); only used listings are consumed by a purchase.

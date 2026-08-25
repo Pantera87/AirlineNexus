@@ -3,6 +3,8 @@ import { useGameStore } from '@store/gameStore';
 import { AIRCRAFT_DATABASE, getAircraftByCategory } from '@data/aircraft';
 import { formatCurrency } from '@utils/helpers';
 import type { Aircraft, AircraftCategory } from '@/types/game';
+import { getRoutePath } from '@/utils/routeEngine';
+import { getPoolStats } from '@/utils/fleetDispatcher';
 import { Plane, Plus, X, DollarSign, Gauge, Users, Navigation, TrendingDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import AircraftImage from '../AircraftImage';
@@ -38,6 +40,13 @@ export function FleetScreen() {
   const [saleResult, setSaleResult] = useState<{ success: boolean; message: string } | null>(null);
 
   if (!airline) return null;
+
+  // Per-type shared-pool summary (see utils/fleetDispatcher): how many of each type are
+  // free, deployed on routes, and usable in total. Shown above the fleet grid.
+  const poolByType = new Map<string, ReturnType<typeof getPoolStats>>();
+  for (const ac of airline.fleet) {
+    if (!poolByType.has(ac.typeId)) poolByType.set(ac.typeId, getPoolStats(airline.fleet, ac.typeId));
+  }
 
   const openSaleModal = (aircraft: Aircraft) => {
     setSaleResult(null);
@@ -146,6 +155,28 @@ export function FleetScreen() {
         ))}
       </div>
 
+      {/* Shared-pool summary: aircraft are pooled per type and shared across routes */}
+      {poolByType.size > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {[...poolByType.entries()].map(([typeId, stats]) => {
+            const type = AIRCRAFT_DATABASE.find((t) => t.id === typeId);
+            return (
+              <span
+                key={typeId}
+                title={`${stats.free} free at hub · ${stats.deployed} deployed on routes · up to ${stats.usable} usable this week. Same-type aircraft can share routes within their workload.`}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs border ${
+                  stats.free > 0 ? 'bg-white/[0.03] border-white/10 text-runway-300' : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                }`}
+              >
+                <Plane className="w-3 h-3" />
+                <span className="font-medium">{type?.name ?? typeId}</span>
+                <span>{stats.deployed}/{stats.usable} deployed · {stats.free} free</span>
+              </span>
+            );
+          })}
+        </div>
+      )}
+
         {airline.fleet.length === 0 ? (
           <div className="glass-panel p-12 flex flex-col items-center justify-center text-center">
             <Plane className="w-12 h-12 text-runway-500 mb-4" />
@@ -189,6 +220,19 @@ export function FleetScreen() {
                           {aircraft.status}
                         </span>
                       </div>
+                      {(() => {
+                        const assignedRoute = airline.routes.find((r) => r.id === aircraft.assignedRoute);
+                        if (!assignedRoute) return null;
+                        const pathLabel = getRoutePath(assignedRoute).join(' → ');
+                        return (
+                          <p
+                            className="text-[11px] text-sky-400 mt-1 truncate"
+                            title={`Assigned to ${pathLabel} ↺ (${assignedRoute.frequency}×/week)`}
+                          >
+                            ↻ {pathLabel} · {assignedRoute.frequency}×/wk
+                          </p>
+                        );
+                      })()}
                     </div>
                     <div className="mt-auto pt-1.5 flex items-center justify-between gap-2">
                       <p className="text-[11px] text-runway-500">
@@ -275,7 +319,7 @@ export function FleetScreen() {
                       </div>
                       {aircraftToSell.assignedRoute && (
                         <p className="text-xs text-amber-400 pt-2 border-t border-white/5">
-                          ⚠ This aircraft is assigned to a route and will be unassigned.
+                          ⚠ This aircraft is deployed on a route — selling it reduces that route's staffed capacity until the dispatcher assigns another airframe of the same type.
                         </p>
                       )}
                       <div className="flex justify-between items-center pt-3 border-t border-white/10">

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useGameStore } from '@store/gameStore';
-import type { Route, AircraftType, Airport } from '@/types/game';
+import type { Route, AircraftType, Airport, Aircraft } from '@/types/game';
 import { getAirportByIata, AIRPORT_DATABASE } from '@data/airports';
 import { AIRCRAFT_DATABASE } from '@data/aircraft';
 import { formatCurrency, formatPercentage } from '@utils/helpers';
@@ -22,6 +22,7 @@ import {
   maxLoopCyclesPerDay,
   getLoopCycleMinutes,
 } from '@/utils/routeEngine';
+import { getRequiredAircraftCount, getPoolStats, getRouteStaffing } from '@/utils/fleetDispatcher';
 
 /** Fallback frequency options when no aircraft type / distance is known yet (up to 4x/day). */
 const FALLBACK_FREQUENCY_OPTIONS: { value: number; label: string }[] = [1, 2, 3, 4].map((d) => ({
@@ -34,14 +35,15 @@ export const MAX_ROUTE_STOPS = 3;
 
 /**
  * Frequency options (full loop cycles per week) limited by the aircraft's physical availability:
- * one option per possible cycles/day up to maxLoopCyclesPerDay for this loop + aircraft.
+ * one option per possible cycles/day, but never more than 4×/day — the store hard-caps weekly
+ * frequency at 28, so offering values above that would produce selections that can't be saved.
  */
 function buildFrequencyOptions(
   pathAirports: Airport[] | null,
   aircraftType: AircraftType | undefined
 ): { value: number; label: string }[] {
   if (!pathAirports || !aircraftType) return FALLBACK_FREQUENCY_OPTIONS;
-  const maxDaily = maxLoopCyclesPerDay(pathAirports, aircraftType);
+  const maxDaily = Math.min(maxLoopCyclesPerDay(pathAirports, aircraftType), 4);
   const options: { value: number; label: string }[] = [];
   for (let d = 1; d <= maxDaily; d++) {
     options.push({ value: d * 7, label: `${d}×/day (${d * 7}/wk)` });
@@ -163,6 +165,10 @@ export function RoutesScreen() {
             const pathIatas = getRoutePath(route);
             const stopCount = route.stops?.length ?? 0;
             const distanceNm = route.distanceNm ?? 0;
+            // Live staffing from the shared fleet pool (see utils/fleetDispatcher).
+            const routeType = AIRCRAFT_DATABASE.find((t) => t.id === route.aircraftId);
+            const staffedCount = getRouteStaffing(airline.fleet, route.id);
+            const requiredCount = getRequiredAircraftCount(resolvePathAirports(pathIatas), routeType, route.frequency);
             return (
               <div
                 key={route.id}
@@ -185,6 +191,22 @@ export function RoutesScreen() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    {routeType && (
+                      <span
+                        className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          !route.isActive
+                            ? 'bg-white/5 text-runway-400'
+                            : requiredCount > 0 && staffedCount >= requiredCount
+                              ? 'bg-green-500/10 text-green-400'
+                              : staffedCount > 0
+                                ? 'bg-amber-500/10 text-amber-400'
+                                : 'bg-red-500/10 text-red-400'
+                        }`}
+                        title="Aircraft from your shared fleet pool assigned to this route. Same-type aircraft can also be shared across routes within their weekly workload."
+                      >
+                        {staffedCount}/{requiredCount} aircraft
+                      </span>
+                    )}
                     <span
                       className={`px-2 py-1 rounded-full text-xs font-medium ${
                         route.isActive ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
@@ -289,6 +311,7 @@ export function RoutesScreen() {
                   if (stops.includes(iata)) setStops(stops.filter((s) => s !== iata));
                 }}
                 onStopsChange={setStops}
+                fleet={airline.fleet}
                 onAircraftTypeChange={setAircraftTypeId}
                 onFrequencyChange={setFrequency}
                 onCreate={handleCreateRoute}
@@ -330,6 +353,7 @@ export function RoutesScreen() {
                       title: 'Route Updated',
                       message: `Route ${selectedRoute.origin} → ${selectedRoute.destination} has been updated.`,
                     });
+                    setSelectedRouteId(null); // close the modal after a successful save
                   } else {
                     addNotification({
                       type: 'error',
@@ -377,6 +401,8 @@ interface RouteCreationFormProps {
   aircraftTypeId: string;
   frequency: number;
   ownedTypeIds: Set<string>;
+  /** Full fleet — used for the live pool-availability check. */
+  fleet: Aircraft[];
   currencyFormat: 'USD' | 'EUR' | 'GBP';
   onDestinationChange: (iata: string) => void;
   onStopsChange: (stops: string[]) => void;
@@ -398,6 +424,7 @@ function RouteCreationForm({
   onAircraftTypeChange,
   onFrequencyChange,
   onCreate,
+  fleet,
 }: RouteCreationFormProps) {
   const [suggestionIata, setSuggestionIata] = useState<string | null>(null);
   const [showStopPicker, setShowStopPicker] = useState(false);
@@ -589,6 +616,27 @@ function RouteCreationForm({
             <span className="text-runway-300">{availability}</span>
           </div>
         )}
+
+        {aircraftType && pathAirports && rangeCheck?.feasible && (() => {
+          const stats = getPoolStats(fleet, aircraftTypeId);
+          const requiredCount = getRequiredAircraftCount(pathAirports, aircraftType, frequency);
+          if (requiredCount === 0) return null;
+          const enough = stats.usable >= requiredCount;
+          return (
+            <div className={`mt-2 flex items-start gap-2 text-sm ${enough ? '' : 'text-amber-400'}`}>
+              {enough ? (
+                <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0 mt-0.5" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              )}
+              <span className={enough ? 'text-runway-300' : 'text-amber-300'}>
+                Fleet check: this frequency needs {requiredCount}× {aircraftType.name} — pool has {stats.usable} usable
+                ({stats.free} free · {stats.deployed} deployed).
+                {enough ? '' : ` Aircraft are shared, so a shortfall trims weekly capacity — consider buying more of this type.`}
+              </span>
+            </div>
+          );
+        })()}
       </div>
 
 
@@ -685,6 +733,7 @@ interface RouteDetailModalProps {
 
 function RouteDetailModal({ route, ownedTypeIds, currencyFormat, onClose, onSave, onToggleActive, onCancel }: RouteDetailModalProps) {
   const fuelPricePerKg = useGameStore((state) => state.world.fuelPrice);
+  const fleet = useGameStore((state) => state.airline?.fleet);
   const [frequency, setFrequency] = useState(route.frequency);
   const [aircraftTypeId, setAircraftTypeId] = useState(route.aircraftId || '');
   const [confirmCancel, setConfirmCancel] = useState(false);
@@ -694,6 +743,12 @@ function RouteDetailModal({ route, ownedTypeIds, currencyFormat, onClose, onSave
   const aircraftType = AIRCRAFT_DATABASE.find((t) => t.id === aircraftTypeId);
   // Stored distanceNm: one-way for legacy direct routes, full loop total for multi-hop.
   const distanceNm = route.distanceNm ?? (pathAirports && pathAirports.length >= 2 ? calculateLoopDistanceNm(pathAirports) : 0);
+
+  // Live staffing of this route's CURRENT aircraft type from the shared fleet pool.
+  const currentType = AIRCRAFT_DATABASE.find((t) => t.id === route.aircraftId);
+  const staffedCount = getRouteStaffing(fleet ?? [], route.id);
+  const requiredCount = getRequiredAircraftCount(pathAirports, currentType, route.frequency);
+  const poolStats = currentType ? getPoolStats(fleet ?? [], currentType.id) : null;
 
   const rangeCheck = aircraftType && pathAirports && pathAirports.length >= 2 ? checkLoopRange(aircraftType, pathAirports) : null;
   // Frequency options & cap are driven by the full loop cycle time of the selected aircraft.
@@ -725,6 +780,26 @@ function RouteDetailModal({ route, ownedTypeIds, currencyFormat, onClose, onSave
           <p className="text-sm text-runway-400 mt-1">
             {pathIatas.join(' → ')} ↺ {route.origin}
           </p>
+          {currentType && (
+            <div className="flex items-center gap-2 mt-1.5 text-xs">
+              <span
+                className={`px-2 py-0.5 rounded-full font-medium ${
+                  !route.isActive
+                    ? 'bg-white/5 text-runway-400'
+                    : requiredCount > 0 && staffedCount >= requiredCount
+                      ? 'bg-green-500/10 text-green-400'
+                      : staffedCount > 0
+                        ? 'bg-amber-500/10 text-amber-400'
+                        : 'bg-red-500/10 text-red-400'
+                }`}
+              >
+                {staffedCount}/{requiredCount} aircraft staffed
+              </span>
+              {poolStats && (
+                <span className="text-runway-500">Pool: {poolStats.usable} usable · {poolStats.free} free</span>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <span
@@ -834,7 +909,7 @@ function RouteDetailModal({ route, ownedTypeIds, currencyFormat, onClose, onSave
         {/* --- Financial data --- */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="rounded-lg bg-white/[0.03] border border-white/5 p-4">
-            <p className="text-xs font-medium text-runway-300 mb-3">Last Settled Week</p>
+            <p className="text-xs font-medium text-runway-300 mb-3">Current Weekly P&amp;L</p>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
               <span className="text-runway-400">Revenue</span>
               <span className="font-medium text-white">{formatCurrency(route.revenue, currencyFormat)}</span>
