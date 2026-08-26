@@ -3,6 +3,8 @@ import { useGameStore } from '@store/gameStore';
 import { formatCurrency } from '@utils/helpers';
 import { DollarSign, TrendingUp, TrendingDown, Wallet, BarChart3, PiggyBank, Settings2 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { ChartPanel, ChartTooltip, compactMoney } from '@/components/charts/ChartPanel';
 import LoanManagementModal from '@/components/LoanManagementModal';
 
 export function FinancesScreen() {
@@ -43,6 +45,31 @@ export function FinancesScreen() {
           </motion.div>
         ))}
       </div>
+      {/* Monthly performance chart */}
+      {(() => {
+        const reports = finances.monthlyReports.slice(-8).map((r) => ({
+          month: new Date(r.month).toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
+          revenue: Math.round(r.revenue),
+          expenses: Math.round(r.expenses),
+          profit: Math.round(r.profit),
+        }));
+        if (reports.length === 0) return null;
+        return (
+          <ChartPanel title="Monthly Performance" subtitle="revenue vs expenses, last 8 months" icon={<BarChart3 className="w-4 h-4 text-sky-400" />}>
+            <ResponsiveContainer width="100%" height={240}>
+              <ComposedChart data={reports} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
+                <XAxis dataKey="month" tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => compactMoney(Number(v))} width={52} />
+                <Tooltip content={<ChartTooltip valueFormatter={compactMoney} />} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
+                <Bar dataKey="revenue" name="Revenue" fill="#34d399" radius={[3, 3, 0, 0]} maxBarSize={28} />
+                <Bar dataKey="expenses" name="Expenses" fill="#fb7185" radius={[3, 3, 0, 0]} maxBarSize={28} />
+                <Line dataKey="profit" name="Profit" stroke="#38bdf8" strokeWidth={2} dot={{ r: 2.5, fill: '#38bdf8' }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </ChartPanel>
+        );
+      })()}
       <div className="glass-panel p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-white">Profit and Loss</h2>

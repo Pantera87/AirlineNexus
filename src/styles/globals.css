@@ -152,6 +152,36 @@ body {
   background: radial-gradient(ellipse at center, #1e293b 0%, #0f172a 100%);
 }
 
+/* Animated dashed route arcs (RouteMapPreview) */
+.route-arc-dash {
+  stroke-dasharray: 5 7;
+  animation: routeDash 1.4s linear infinite;
+}
+
+@keyframes routeDash {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+
+/* Pulsing hub ring (RouteMapPreview) */
+.map-hub-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: hubPulse 2.4s ease-out infinite;
+}
+
+@keyframes hubPulse {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+
 /* Button styles */
 .btn-primary {
   padding: 0.5rem 1rem;

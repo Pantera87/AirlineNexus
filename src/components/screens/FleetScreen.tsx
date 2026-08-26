@@ -8,6 +8,8 @@ import { getPoolStats } from '@/utils/fleetDispatcher';
 import { Plane, Plus, X, DollarSign, Gauge, Users, Navigation, TrendingDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import AircraftImage from '../AircraftImage';
+import { StatusPill, MeterBar, toneFromStatus } from '@/components/icons/StatusIcons';
+import { AircraftArtwork, NarrowBodySilhouette } from '@/components/icons/AircraftSilhouettes';
 
 // Estimate resale value: ~5% depreciation per year + condition factor
 function estimateSalePrice(aircraft: Aircraft): number | null {
@@ -179,7 +181,9 @@ export function FleetScreen() {
 
         {airline.fleet.length === 0 ? (
           <div className="glass-panel p-12 flex flex-col items-center justify-center text-center">
-            <Plane className="w-12 h-12 text-runway-500 mb-4" />
+            <div className="w-60 h-24 mb-4 rounded-xl bg-gradient-to-br from-sky-900/30 to-blue-900/30 border border-white/5 flex items-center justify-center">
+              <NarrowBodySilhouette className="w-48 h-20" />
+            </div>
             <h2 className="text-lg font-semibold text-white mb-2">Your fleet is empty</h2>
         <p className="text-sm text-runway-400 mb-4">Start building your airline by acquiring your first aircraft.</p>
         <div className="flex items-center gap-3">
@@ -206,19 +210,17 @@ export function FleetScreen() {
                 return (
                   <div key={aircraft.id} className="glass-panel p-2 flex flex-col">
                     {type?.imageKey ? (
-                      <AircraftImage keyOrId={type.imageKey} alt={type.name} className="w-full aspect-[16/8] rounded-lg" />
+                      <AircraftImage keyOrId={type.imageKey} alt={type.name} category={type.category} className="w-full aspect-[16/8] rounded-lg" />
                     ) : (
-                      <div className="w-full aspect-[16/8] rounded-lg bg-sky-500/10 flex items-center justify-center">
-                        <Plane className="w-7 h-7 text-sky-400" />
-                      </div>
+                      <AircraftArtwork category={type?.category} className="w-full aspect-[16/8] rounded-lg" />
                     )}
                     <div className="mt-1.5 min-w-0">
                       <p className="text-sm font-semibold text-white truncate">{type?.name || 'Unknown'}</p>
                       <div className="flex items-center gap-2 mt-1">
                         <span className="text-xs text-runway-400">{aircraft.registration}</span>
-                        <span className={`badge ${aircraft.status === 'available' ? 'badge-success' : 'badge-warning'}`}>
+                        <StatusPill tone={toneFromStatus(aircraft.status)} className="text-[11px] px-1.5 py-0.5">
                           {aircraft.status}
-                        </span>
+                        </StatusPill>
                       </div>
                       {(() => {
                         const assignedRoute = airline.routes.find((r) => r.id === aircraft.assignedRoute);
@@ -234,9 +236,11 @@ export function FleetScreen() {
                         );
                       })()}
                     </div>
-                    <div className="mt-auto pt-1.5 flex items-center justify-between gap-2">
+                    <div className="mt-auto pt-1.5 space-y-1">
+                      <MeterBar value={aircraft.condition / 100} height="h-1" />
+                      <div className="flex items-center justify-between gap-2">
                       <p className="text-[11px] text-runway-500">
-                        {aircraft.age}y · {aircraft.condition}% cond · {aircraft.totalFlightHours}h
+                        {aircraft.age}y · {aircraft.condition}% cond · {aircraft.totalFlightHours.toLocaleString()}h
                       </p>
                       {(() => {
                         const salePrice = estimateSalePrice(aircraft);
@@ -252,6 +256,7 @@ export function FleetScreen() {
                           </button>
                         );
                       })()}
+                      </div>
                     </div>
                   </div>
                 );
@@ -397,8 +402,10 @@ export function FleetScreen() {
                       <div className="flex items-center justify-between">
                       <div className="flex-1 flex items-center gap-3">
                         {ac.imageKey ? (
-                          <AircraftImage keyOrId={ac.imageKey} alt={ac.name} className="w-20 h-12 rounded-lg shrink-0" />
-                        ) : null}
+                          <AircraftImage keyOrId={ac.imageKey} alt={ac.name} category={ac.category} className="w-20 h-12 rounded-lg shrink-0" />
+                        ) : (
+                          <AircraftArtwork category={ac.category} className="w-20 h-12 rounded-lg shrink-0" artClassName="w-3/4 h-3/4" />
+                        )}
                         <div className="flex items-center gap-2 mb-2">
                           <h3 className="text-sm font-semibold text-white">{ac.name}</h3>
                           <span className="badge badge-info">{ac.category}</span>
