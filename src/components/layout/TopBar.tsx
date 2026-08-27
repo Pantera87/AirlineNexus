@@ -18,6 +18,7 @@ export function TopBar() {
   const airline = useGameStore((state) => state.airline);
   const currentScreen = useGameStore((state) => state.currentScreen);
   const navigateTo = useGameStore((state) => state.navigateTo);
+  const currencyFormat = useGameStore((state) => state.settings.currencyFormat);
 
   // Use GameTimeEngine to display date and time
   const safeCurrentDate = currentDate && currentDate instanceof Date ? currentDate : new Date();
@@ -68,7 +69,7 @@ export function TopBar() {
           <div className="flex items-center gap-2 px-4 py-2 bg-runway-800 rounded-lg">
             <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
             <span className="text-sm font-mono font-semibold text-green-400">
-              {formatCurrency(airline.finances.cash, useGameStore((state) => state.settings.currencyFormat))}
+              {formatCurrency(airline.finances.cash, currencyFormat)}
             </span>
           </div>
         )}

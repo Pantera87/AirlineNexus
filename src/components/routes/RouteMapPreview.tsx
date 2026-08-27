@@ -5,11 +5,14 @@
 // 2:1, left edge = 180° meridian), so it lines up exactly with that
 // projection. Interactive camera: wheel zoom at cursor, drag to pan,
 // +/-/reset buttons, double-click zoom. Pin and plane sizes scale with
-// the zoom level so they keep a consistent on-screen size.
+// the zoom level so they keep a consistent on-screen size. The camera's
+// viewBox always matches the container's measured aspect ratio, so the map
+// fills the element edge to edge with no blank side bars — on wide 4K+
+// screens it simply zooms in a bit (the world has plenty of latitude).
 // ============================================================
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Route, TimetableLeg } from '@/types/game';
+import type { Route, TimetableLeg, GameSpeed } from '@/types/game';
 import { getAirportByIata } from '@/data/airports';
 import { useGameStore } from '@/store/gameStore';
 
@@ -26,8 +29,8 @@ function project([lon, lat]: XY): XY {
   return [lon + 180, 90 - lat];
 }
 
-function clampCam(w: number, x: number, y: number): Rect {
-  const h = w / 2;
+/** Clamp a camera rectangle (width × height in world units) to the world. */
+function clampCam(w: number, h: number, x: number, y: number): Rect {
   return {
     x: Math.min(WORLD_W - w, Math.max(0, x)),
     y: Math.min(WORLD_H - h, Math.max(0, y)),
@@ -158,14 +161,135 @@ function planeMarker(route: Route, routeLegs: Leg[], hub: XY, now: Date): PlaneM
 type RouteLayer = { d: string; color: string; active: boolean; start: XY; route: Route; legs: Leg[] };
 type Pin = { x: number; y: number; isHub: boolean; active: boolean };
 
+const TICK_GAME_MS: Record<GameSpeed, number> = {
+  paused: 0,
+  normal: 60_000, // 1 game-minute per tick
+  fast: 15 * 60_000, // 15 game-minutes
+  fastest: 60 * 60_000, // 1 game-hour
+};
+
+type TickAnchor = { wall: number; game: number };
+
+/**
+ * Smoothed game date for marker motion.
+ *
+ * The store's clock updates once per real second in a fixed step
+ * (1 min / 15 min / 1 hour). Markers interpolate between the two most recent
+ * store ticks, measured at their ACTUAL wall-clock spacing (so interval
+ * jitter cannot produce a sawtooth) and extrapolate linearly until the next
+ * tick. Because the old pair's extrapolation meets the new store value
+ * exactly at the tick instant, re-anchoring never snaps the marker back and
+ * forth. On speed changes the anchors are re-seeded with a slope that lands
+ * exactly on the predicted first tick, and a monotonic floor keeps the
+ * displayed time from ever moving backwards.
+ */
+function useSmoothedGameDate(currentDate: Date | null, gameSpeed: GameSpeed): Date {
+  const [displayDate, setDisplayDate] = useState<Date>(() =>
+    currentDate && currentDate instanceof Date ? currentDate : new Date()
+  );
+  const initGame = displayDate.getTime();
+  // Two most recent anchors (normally the last two store ticks); seeded with
+  // the current speed's nominal step so markers start moving immediately.
+  const pairRef = useRef<{ a: TickAnchor; b: TickAnchor }>({
+    a: { wall: performance.now() - 1000, game: initGame - TICK_GAME_MS[gameSpeed] },
+    b: { wall: performance.now(), game: initGame },
+  });
+  const floorRef = useRef<number>(initGame); // displayed game time never drops below this
+  const heldRef = useRef<number>(initGame); // last displayed game time
+  const storeNowRef = useRef<number>(initGame); // last store date in game-ms
+  const lastDateRef = useRef<Date | null>(currentDate);
+  const mountedRef = useRef(false);
+
+  // New store tick → shift the anchor pair, measured at the real spacing.
+  useEffect(() => {
+    if (currentDate === lastDateRef.current) return; // mount: keep the seeded slope
+    lastDateRef.current = currentDate;
+    if (!currentDate || !(currentDate instanceof Date)) return;
+    const p = pairRef.current;
+    const g = currentDate.getTime();
+    storeNowRef.current = g;
+    const wall = performance.now();
+    if (g < p.b.game) {
+      // Store time jumped backwards (e.g. loading an older save): reset to
+      // the new truth instead of interpolating backwards.
+      p.a = p.b = { wall, game: g };
+      floorRef.current = g;
+      heldRef.current = g;
+    } else {
+      p.a = p.b;
+      p.b = { wall, game: g };
+    }
+  }, [currentDate]);
+
+  // Speed change (play/pause, speed switch) → re-seed the anchors so the
+  // displayed time blends continuously to the predicted first tick.
+  useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      return;
+    }
+    const wall = performance.now();
+    const held = heldRef.current;
+    const storeNow = storeNowRef.current;
+    const s = TICK_GAME_MS[gameSpeed];
+    if (gameSpeed === 'paused' || held > storeNow + s) {
+      // Frozen while paused; or held is above the predicted first tick
+      // (resumed at a lower speed) → settle at the honest value.
+      const g = gameSpeed === 'paused' ? held : storeNow;
+      pairRef.current = { a: { wall, game: g }, b: { wall, game: g } };
+      floorRef.current = g;
+      heldRef.current = g;
+    } else {
+      // Blend from the held value so that the first tick after the change
+      // lands with zero discontinuity (game-ms per wall-ms).
+      const rate = (storeNow + s - held) / 1000;
+      pairRef.current = {
+        a: { wall: wall - 1000, game: held - 1000 * rate },
+        b: { wall, game: held },
+      };
+      floorRef.current = held;
+    }
+  }, [gameSpeed]);
+
+  useEffect(() => {
+    let raf = 0;
+    const frame = () => {
+      const { a, b } = pairRef.current;
+      const now = performance.now();
+      let game: number;
+      if (gameSpeed === 'paused' || b.wall <= a.wall) {
+        game = b.game; // frozen (paused, or waiting for the first tick)
+      } else {
+        const rate = (b.game - a.game) / (b.wall - a.wall); // game-ms per wall-ms
+        game = rate > 0 ? b.game + (now - b.wall) * rate : b.game;
+      }
+      if (game < floorRef.current) game = floorRef.current;
+      if (game !== heldRef.current) {
+        heldRef.current = game;
+        setDisplayDate(new Date(game));
+      }
+      raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, [gameSpeed]);
+
+  return displayDate;
+}
+
 export function RouteMapPreview({ routes, className = '' }: { routes: Route[]; className?: string }) {
   // The map's motion must respect the game clock: markers are placed from the
-  // timetable + current game date, so they glide with the clock and freeze
-  // in place when paused.
+  // timetable + a continuously extrapolated game date, so they glide with the
+  // clock (smoothed between the store's 1s ticks) and freeze when paused.
   const gameSpeed = useGameStore((state) => state.gameSpeed);
   const currentDate = useGameStore((state) => state.currentDate);
   const paused = gameSpeed === 'paused';
-  const now = currentDate && currentDate instanceof Date ? currentDate : new Date();
+  const now = useSmoothedGameDate(currentDate, gameSpeed);
+  // Container aspect ratio (width / height), measured live (see the
+  // ResizeObserver below). The camera's viewBox always matches it, so the map
+  // fills the whole element with no letterboxed blank side bars — even on
+  // very wide monitors.
+  const [aspect, setAspect] = useState(2);
   const { layers, pins, fit } = useMemo(() => {
     const pins = new Map<string, Pin>();
     const addPin = (iata: string, isHub: boolean, active: boolean) => {
@@ -200,7 +324,11 @@ export function RouteMapPreview({ routes, className = '' }: { routes: Route[]; c
       layers.push({ d: buildLoopPath(legs), color: ROUTE_COLORS[ri % ROUTE_COLORS.length], active: route.isActive, start: pts[0], route, legs });
     }
 
-    // Auto-fit camera around the network
+    // Auto-fit camera around the network. The rectangle always matches the
+    // container's aspect ratio (A = width/height) so the viewBox fills the
+    // element exactly — on wide screens the fit zooms in a bit instead of
+    // leaving blank bars on the sides.
+    const A = aspect;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     const grow = (x: number, y: number) => {
       minX = Math.min(minX, x); maxX = Math.max(maxX, x);
@@ -213,34 +341,44 @@ export function RouteMapPreview({ routes, className = '' }: { routes: Route[]; c
       while ((mt = m.exec(l.d))) grow(parseFloat(mt[1]), parseFloat(mt[2]));
     });
     if (!isFinite(minX)) { minX = 0; maxX = WORLD_W; minY = 0; maxY = WORLD_H; }
-    let padX = (maxX - minX) * 0.14 + 3;
-    let padY = (maxY - minY) * 0.14 + 3;
-    let vx = Math.max(0, minX - padX);
-    let vy = Math.max(0, minY - padY);
-    let vw = Math.min(WORLD_W, maxX + padX - vx);
-    let vh = Math.min(WORLD_H, maxY + padY - vy);
+    const padX = (maxX - minX) * 0.14 + 3;
+    const padY = (maxY - minY) * 0.14 + 3;
+    let vw = Math.max(maxX - minX + 2 * padX, (maxY - minY + 2 * padY) * A);
     const minSpan = 34;
-    if (vw < minSpan || vh < minSpan / 2) {
-      const cx = vx + vw / 2, cy = vy + vh / 2;
-      const ratio = Math.max(minSpan / vw, minSpan / 2 / vh, 1);
-      vw *= ratio; vh *= ratio;
-      vx = Math.max(0, Math.min(WORLD_W - vw, cx - vw / 2));
-      vy = Math.max(0, Math.min(WORLD_H - vh, cy - vh / 2));
-    }
-    const cam = clampCam(vw, vx, vy);
+    vw = Math.max(vw, minSpan, (minSpan / 2) * A);
+    vw = Math.min(vw, WORLD_W, WORLD_H * A);
+    const vh = vw / A;
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const vx = Math.min(WORLD_W - vw, Math.max(0, cx - vw / 2));
+    const vy = Math.min(WORLD_H - vh, Math.max(0, cy - vh / 2));
+    const cam = clampCam(vw, vh, vx, vy);
     return { layers, pins, fit: cam };
-  }, [routes]);
+  }, [routes, aspect]);
 
   const [camera, setCamera] = useState<Rect | null>(null); // null = auto-fit
   const cam = camera ?? fit;
   const svgRef = useRef<SVGSVGElement | null>(null);
 
+  // Container aspect changes (window resize) → re-derive the user's camera so
+  // it keeps its zoom level and center but matches the new aspect exactly.
+  useEffect(() => {
+    setCamera((cur) => {
+      if (!cur) return cur;
+      const w = Math.min(cur.w, WORLD_H * aspect);
+      const h = w / aspect;
+      const x = Math.min(WORLD_W - w, Math.max(0, cur.x + cur.w / 2 - w / 2));
+      const y = Math.min(WORLD_H - h, Math.max(0, cur.y + cur.h / 2 - h / 2));
+      return clampCam(w, h, x, y);
+    });
+  }, [aspect]);
+
   const zoomAround = (cx: number, cy: number, factor: number) => {
     setCamera((cur) => {
       const c = cur ?? fit;
-      const w = Math.min(MAX_SPAN, Math.max(MIN_SPAN, c.w * factor));
+      const w = Math.min(MAX_SPAN, WORLD_H * aspect, Math.max(MIN_SPAN, c.w * factor));
       const k = w / c.w;
-      return clampCam(w, cx - (cx - c.x) * k, cy - (cy - c.y) * k);
+      return clampCam(w, c.h * k, cx - (cx - c.x) * k, cy - (cy - c.y) * k);
     });
   };
 
@@ -271,6 +409,21 @@ export function RouteMapPreview({ routes, className = '' }: { routes: Route[]; c
     };
   });
 
+  // Keep `aspect` in sync with the rendered element's width/height so the
+  // camera's viewBox always matches it exactly (no letterboxed blank bars).
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      const r = entries[0]?.contentRect;
+      if (!r || r.width <= 0 || r.height <= 0) return;
+      const a = Math.round(Math.min(16, Math.max(0.35, r.width / r.height)) * 100) / 100;
+      setAspect((cur) => (cur === a ? cur : a));
+    });
+    ro.observe(svg);
+    return () => ro.disconnect();
+  }, []);
+
   const dragRef = useRef<{ px: number; py: number; cam: Rect } | null>(null);
   const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -283,7 +436,7 @@ export function RouteMapPreview({ routes, className = '' }: { routes: Route[]; c
     const r = svg.getBoundingClientRect();
     const dx = ((e.clientX - d.px) / r.width) * d.cam.w;
     const dy = ((e.clientY - d.py) / r.height) * d.cam.h;
-    setCamera(clampCam(d.cam.w, d.cam.x - dx, d.cam.y - dy));
+    setCamera(clampCam(d.cam.w, d.cam.h, d.cam.x - dx, d.cam.y - dy));
   };
   const onPointerUp = () => {
     dragRef.current = null;
@@ -314,6 +467,7 @@ export function RouteMapPreview({ routes, className = '' }: { routes: Route[]; c
       <svg
         ref={svgRef}
         viewBox={`${cam.x.toFixed(2)} ${cam.y.toFixed(2)} ${cam.w.toFixed(2)} ${cam.h.toFixed(2)}`}
+        preserveAspectRatio="xMidYMid meet"
         className="block h-full w-full cursor-grab touch-none select-none active:cursor-grabbing"
         role="img"
         aria-label="Route map preview"

@@ -158,7 +158,7 @@ export class GameTimeEngine {
     */
    private addMinutes(minutes: number): void {
      this.currentMinute += minutes;
-     let totalMinutes = this.currentMinute;
+     const totalMinutes = this.currentMinute;
      
      // Calculate hours and minutes using modulo
      const hoursToAdd = Math.floor(totalMinutes / 60);

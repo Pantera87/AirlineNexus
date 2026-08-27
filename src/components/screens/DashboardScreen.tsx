@@ -12,11 +12,10 @@ export function DashboardScreen() {
   const airline = useGameStore((state) => state.airline);
   const currentDate = useGameStore((state) => state.currentDate);
   const notifications = useGameStore((state) => state.notifications);
+  const currencyFormat = useGameStore((state) => state.settings.currencyFormat);
 
   if (!airline) return null;
 
-  const currencyFormat = useGameStore((state) => state.settings.currencyFormat);
-  
   const stats = [
     {
       label: 'Cash Balance',

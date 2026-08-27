@@ -27,7 +27,7 @@ function calculateUsedPrice(
   const age = currentGameYear - yearBuilt;
 
   // Base depreciation curve (steeper early years, flattening later)
-  let ageFactor = Math.max(0.15, 1 - (age * 0.035));  // ~3.5% per year minimum floor 15%
+  const ageFactor = Math.max(0.15, 1 - (age * 0.035));  // ~3.5% per year minimum floor 15%
 
   // Flight hours penalty (above expected baseline)
   const expectedHoursForAge = age * 3000;              // Roughly 3k hrs/year typical airline use

@@ -517,7 +517,7 @@ function RouteCreationForm({
   // Auto-clamp if the chosen frequency exceeds what this aircraft can physically fly per week.
   useEffect(() => {
     if (frequency > maxWeekly) onFrequencyChange(maxWeekly);
-  }, [maxWeekly, frequency]);
+  }, [maxWeekly, frequency, onFrequencyChange]);
 
   const suggestions = useMemo(() => {
     if (!hubAirport || !aircraftType) return [];
