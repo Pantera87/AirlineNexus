@@ -40,7 +40,7 @@ export function DashboardScreen() {
       bg: 'bg-purple-500/10',
     },
     {
-      label: 'Active Routes',
+      label: `Active Routes · ${airline.routes.reduce((s, r) => s + (r.timetable?.legs.length ?? 0), 0)} flights/wk`,
       value: String(airline.routes.filter((r) => r.isActive).length),
       icon: <TrendingUp className="w-5 h-5" />,
       color: 'text-amber-400',

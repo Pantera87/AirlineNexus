@@ -39,6 +39,7 @@ import {
 } from '@/utils/routeEngine';
 import { computeDispatchPlan } from '@/utils/fleetDispatcher';
 import type { RouteStaffing } from '@/utils/fleetDispatcher';
+import { generateTimetable, needsTimetableRegeneration } from '@/utils/timetable';
 import { GameTimeRepository } from '@/database/repositories/gameTime.repository';
 
 // In-game milliseconds per week (one in-game day is 24 hours of simulated time).
@@ -820,8 +821,23 @@ export const useGameStore = create<GameStore>()(
           frequency = Math.min(frequency, maxLoopFrequencyPerWeek(pathAirports as Airport[], assignedType));
         }
 
+        // Weekly timetable: hub-local departure/arrival times for every scheduled cycle.
+        // Flight numbers use this route's 1-based position in the routes array.
+        const routeId = generateId('route');
+        const timetable =
+          assignedType && pathAirports.length > 1
+            ? generateTimetable(
+                routeId,
+                airline.routes.length + 1,
+                frequency,
+                pathAirports as Airport[],
+                assignedType,
+                airline.iataCode
+              )
+            : undefined;
+
         const newRoute: Route = {
-          id: generateId('route'),
+          id: routeId,
           origin,
           destination,
           ...(isMultiHop ? { stops } : {}),
@@ -836,6 +852,7 @@ export const useGameStore = create<GameStore>()(
           distanceNm,
           flightTimeMin,
           demandScore,
+          timetable,
         };
 
         set({
@@ -900,6 +917,23 @@ export const useGameStore = create<GameStore>()(
 
         if (isActive !== undefined) {
           next.isActive = isActive;
+        }
+
+        // Regenerate the weekly timetable when frequency/aircraft changed (or it's missing).
+        const timetablePath = resolveRoutePathAirports(next);
+        const timetableType = findAircraftById(next.aircraftId);
+        if (timetablePath && timetableType && needsTimetableRegeneration(next, timetablePath, timetableType)) {
+          next = {
+            ...next,
+            timetable: generateTimetable(
+              routeId,
+              airline.routes.findIndex((r) => r.id === routeId) + 1,
+              next.frequency,
+              timetablePath,
+              timetableType,
+              airline.iataCode
+            ),
+          };
         }
 
         set({
@@ -1228,6 +1262,12 @@ export const useGameStore = create<GameStore>()(
     }),
     {
       name: 'airline-sim-storage',
+      // Old saves predate route timetables: regenerate any missing/stale ones after rehydration.
+      onRehydrateStorage: () => (state) => {
+        if (state?.airline?.routes?.length) {
+          setTimeout(regenerateMissingTimetables, 0);
+        }
+      },
       // Don't persist certain volatile state
       partialize: (state) => ({
         airline: state.airline,
@@ -1239,3 +1279,29 @@ export const useGameStore = create<GameStore>()(
     }
   )
 );
+
+// Lazy timetable migration: older saves predate route timetables. Regenerates any
+// missing/stale timetables once, after the persisted state has been rehydrated.
+function regenerateMissingTimetables(): void {
+  const state = useGameStore.getState();
+  const airline = state.airline;
+  if (!airline || airline.routes.length === 0) return;
+
+  let changed = false;
+  const routes = airline.routes.map((route, index) => {
+    const type = findAircraftById(route.aircraftId);
+    const path = resolveRoutePathAirports(route);
+    if (type && path && needsTimetableRegeneration(route, path, type)) {
+      changed = true;
+      return {
+        ...route,
+        timetable: generateTimetable(route.id, index + 1, route.frequency, path, type, airline.iataCode),
+      };
+    }
+    return route;
+  });
+
+  if (changed) {
+    useGameStore.setState({ airline: { ...airline, routes } });
+  }
+}

@@ -9,8 +9,9 @@
 // ============================================================
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Route } from '@/types/game';
+import type { Route, TimetableLeg } from '@/types/game';
 import { getAirportByIata } from '@/data/airports';
+import { useGameStore } from '@/store/gameStore';
 
 const WORLD_W = 360;
 const WORLD_H = 180;
@@ -63,10 +64,108 @@ function buildLoopPath(legs: Leg[]): string {
     .join(' ');
 }
 
-type RouteLayer = { d: string; color: string; active: boolean; dur: number };
+const DAY_MIN = 1440;
+const WEEK_MIN = 7 * DAY_MIN;
+
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+
+/** Point on a quadratic arc leg at fraction t (0..1). */
+function pointOnLeg(leg: Leg, t: number): XY {
+  const u = 1 - t;
+  return [
+    u * u * leg.start[0] + 2 * u * t * leg.ctrl[0] + t * t * leg.end[0],
+    u * u * leg.start[1] + 2 * u * t * leg.ctrl[1] + t * t * leg.end[1],
+  ];
+}
+
+type PlaneMarker = { x: number; y: number; angle: number };
+
+/**
+ * Position + heading on the route's drawn loop (SVG coords) for the timetable
+ * cycle currently in flight at `now`. Timetable leg i maps 1:1 to drawn
+ * segment i (both follow [origin, ...stops, destination] around the loop), so
+ * the marker follows the real game clock: it glides with the clock while the
+ * game runs and freezes in place while paused. Returns the hub point while
+ * the route is on the ground between cycles.
+ */
+function planeMarker(route: Route, routeLegs: Leg[], hub: XY, now: Date): PlaneMarker {
+  const atHub: PlaneMarker = { x: hub[0], y: hub[1], angle: 0 };
+  const timetable = route.timetable;
+  if (!timetable || timetable.legs.length === 0 || routeLegs.length === 0) return atHub;
+
+  // Legs are stored flat; rebuild the cycles (each cycle shares a flight number).
+  const byFlight = new Map<string, TimetableLeg[]>();
+  for (const leg of timetable.legs) {
+    const arr = byFlight.get(leg.flightNumber);
+    if (arr) arr.push(leg);
+    else byFlight.set(leg.flightNumber, [leg]);
+  }
+  const cycles = [...byFlight.values()];
+  if (cycles.length === 0) return atHub;
+
+  // Minutes since Monday 00:00 of the current week (ISO: Monday = 0).
+  const dow = (now.getDay() + 6) % 7;
+  const nowWeekMin = dow * DAY_MIN + now.getHours() * 60 + now.getMinutes();
+
+  // Full span of a cycle: block times + turnarounds between consecutive legs
+  // (times are wrapped past midnight, so gaps are taken mod 1440).
+  const cycleSpan = (legs: TimetableLeg[]): number => {
+    let span = legs[0].durationMin;
+    for (let i = 1; i < legs.length; i++) {
+      span += (legs[i].departureMin - legs[i - 1].arrivalMin + DAY_MIN) % DAY_MIN;
+      span += legs[i].durationMin;
+    }
+    return span;
+  };
+
+  // The most recently departed cycle (a "future" one this week means last week's).
+  let best: TimetableLeg[] | null = null;
+  let bestStart = -Infinity;
+  for (const cycle of cycles) {
+    const weekStart = cycle[0].dayIndex * DAY_MIN + cycle[0].departureMin;
+    const start = weekStart > nowWeekMin ? weekStart - WEEK_MIN : weekStart;
+    if (start > bestStart) {
+      bestStart = start;
+      best = cycle;
+    }
+  }
+  if (!best) return atHub;
+
+  const span = cycleSpan(best);
+  const elapsed = nowWeekMin - bestStart;
+  if (span <= 0 || elapsed < 0 || elapsed >= span) return atHub; // on the ground
+
+  // Walk the cycle's legs to find which segment the aircraft is on.
+  let cur = 0;
+  for (let i = 0; i < best.length; i++) {
+    const segStart = cur;
+    cur += best[i].durationMin;
+    const segEnd = cur;
+    if (elapsed < segEnd || i === best.length - 1) {
+      const t = clamp01((elapsed - segStart) / Math.max(1, segEnd - segStart));
+      const leg = routeLegs[i % routeLegs.length];
+      const [x, y] = pointOnLeg(leg, t);
+      // Quadratic Bézier tangent at t → heading.
+      const dx = 2 * (1 - t) * (leg.ctrl[0] - leg.start[0]) + 2 * t * (leg.end[0] - leg.ctrl[0]);
+      const dy = 2 * (1 - t) * (leg.ctrl[1] - leg.start[1]) + 2 * t * (leg.end[1] - leg.ctrl[1]);
+      return { x, y, angle: (Math.atan2(dy, dx) * 180) / Math.PI };
+    }
+    cur += (best[i + 1].departureMin - best[i].arrivalMin + DAY_MIN) % DAY_MIN;
+  }
+  return atHub;
+}
+
+type RouteLayer = { d: string; color: string; active: boolean; start: XY; route: Route; legs: Leg[] };
 type Pin = { x: number; y: number; isHub: boolean; active: boolean };
 
 export function RouteMapPreview({ routes, className = '' }: { routes: Route[]; className?: string }) {
+  // The map's motion must respect the game clock: markers are placed from the
+  // timetable + current game date, so they glide with the clock and freeze
+  // in place when paused.
+  const gameSpeed = useGameStore((state) => state.gameSpeed);
+  const currentDate = useGameStore((state) => state.currentDate);
+  const paused = gameSpeed === 'paused';
+  const now = currentDate && currentDate instanceof Date ? currentDate : new Date();
   const { layers, pins, fit } = useMemo(() => {
     const pins = new Map<string, Pin>();
     const addPin = (iata: string, isHub: boolean, active: boolean) => {
@@ -98,8 +197,7 @@ export function RouteMapPreview({ routes, className = '' }: { routes: Route[]; c
       const legs: Leg[] = [];
       for (let i = 0; i < pts.length - 1; i++) legs.push(makeLeg(pts[i], pts[i + 1]));
       legs.push(makeLeg(pts[pts.length - 1], pts[0]));
-      const dur = Math.min(60, Math.max(8, (route.flightTimeMin ?? 60) * 0.18));
-      layers.push({ d: buildLoopPath(legs), color: ROUTE_COLORS[ri % ROUTE_COLORS.length], active: route.isActive, dur });
+      layers.push({ d: buildLoopPath(legs), color: ROUTE_COLORS[ri % ROUTE_COLORS.length], active: route.isActive, start: pts[0], route, legs });
     }
 
     // Auto-fit camera around the network
@@ -212,7 +310,7 @@ export function RouteMapPreview({ routes, className = '' }: { routes: Route[]; c
     'flex h-7 w-7 items-center justify-center rounded-md border border-sky-500/30 bg-slate-900/70 text-sm font-bold text-sky-300 backdrop-blur-sm transition hover:bg-slate-800/80 hover:text-sky-200';
 
   return (
-    <div className={`relative overflow-hidden rounded-xl border border-sky-900/60 bg-[#0a1220] ${className}`}>
+    <div className={`relative overflow-hidden rounded-xl border border-sky-900/60 bg-[#0a1220] ${paused ? 'map-paused ' : ''}${className}`}>
       <svg
         ref={svgRef}
         viewBox={`${cam.x.toFixed(2)} ${cam.y.toFixed(2)} ${cam.w.toFixed(2)} ${cam.h.toFixed(2)}`}
@@ -292,24 +390,23 @@ export function RouteMapPreview({ routes, className = '' }: { routes: Route[]; c
           </g>
         ))}
 
-        {/* Planes flying the full loop (size scales with zoom) */}
-        {activeLayers.map((l, i) => (
-          <path
-            key={`plane-${i}`}
-            d={planeD}
-            fill={l.color}
-            stroke="#f8fafc"
-            strokeWidth={0.2 * planeScale}
-          >
-            <animateMotion
-              dur={`${l.dur.toFixed(1)}s`}
-              begin={`${(-(i * 1.7)).toFixed(1)}s`}
-              repeatCount="indefinite"
-              path={l.d}
-              rotate="auto"
+        {/* Planes: positioned on the arc from the timetable + game date (size scales with zoom).
+            They follow the game clock — gliding each tick while running, frozen while paused,
+            parked at the hub while the route is on the ground. */}
+        {activeLayers.map((l, i) => {
+          const m = planeMarker(l.route, l.legs, l.start, now);
+          return (
+            <path
+              key={`plane-${i}`}
+              d={planeD}
+              fill={l.color}
+              stroke="#f8fafc"
+              strokeWidth={0.2 * planeScale}
+              className="map-plane-marker"
+              transform={`translate(${m.x.toFixed(2)} ${m.y.toFixed(2)}) rotate(${m.angle.toFixed(1)})`}
             />
-          </path>
-        ))}
+          );
+        })}
 
         {/* Airport pins (size scales with zoom) */}
         {[...pins.entries()].map(([iata, pin]) => (

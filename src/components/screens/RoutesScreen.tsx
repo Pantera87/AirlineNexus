@@ -4,7 +4,7 @@ import type { Route, AircraftType, Airport, Aircraft } from '@/types/game';
 import { getAirportByIata, AIRPORT_DATABASE } from '@data/airports';
 import { AIRCRAFT_DATABASE } from '@data/aircraft';
 import { formatCurrency, formatPercentage } from '@utils/helpers';
-import { Map, Plus, X, Plane, Lightbulb, CheckCircle2, AlertTriangle, Pencil, Trash2, Pause, Play, Clock, Repeat, TrendingUp, TrendingDown } from 'lucide-react';
+import { Map, Plus, X, Plane, Lightbulb, CheckCircle2, AlertTriangle, Pencil, Trash2, Pause, Play, Clock, Repeat, TrendingUp, TrendingDown, CalendarClock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AirportPicker } from '@/components/AirportPicker';
 import { RouteMapPreview } from '@/components/routes/RouteMapPreview';
@@ -25,6 +25,7 @@ import {
   getLoopCycleMinutes,
 } from '@/utils/routeEngine';
 import { getRequiredAircraftCount, getPoolStats, getRouteStaffing } from '@/utils/fleetDispatcher';
+import { formatMinutes } from '@/utils/timetable';
 
 /** Fallback frequency options when no aircraft type / distance is known yet (up to 4x/day). */
 const FALLBACK_FREQUENCY_OPTIONS: { value: number; label: string }[] = [1, 2, 3, 4].map((d) => ({
@@ -86,6 +87,7 @@ export function RoutesScreen() {
   const createRoute = useGameStore((state) => state.createRoute);
   const updateRoute = useGameStore((state) => state.updateRoute);
   const cancelRoute = useGameStore((state) => state.cancelRoute);
+  const navigateTo = useGameStore((state) => state.navigateTo);
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
@@ -122,7 +124,7 @@ export function RoutesScreen() {
       addNotification({
         type: 'success',
         title: 'Route Created',
-        message: `Loop ${getRoutePath({ origin: hubIata, stops, destination }).join(' → ')} has been created.`,
+        message: `Loop ${getRoutePath({ origin: hubIata, stops, destination }).join(' → ')} has been created - first departure at ${formatMinutes(6 * 60 + 30)} local time.`,
       });
       setShowCreateModal(false);
       setDestination('');
@@ -230,6 +232,16 @@ export function RoutesScreen() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
+                        navigateTo('timetable');
+                      }}
+                      className="p-1.5 rounded-lg bg-white/[0.03] border border-white/10 text-runway-400 hover:text-sky-300 hover:border-white/25 transition-colors"
+                      title="View weekly timetable"
+                    >
+                      <CalendarClock className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
                         setSelectedRouteId(route.id);
                       }}
                       className="p-1.5 rounded-lg bg-white/[0.03] border border-white/10 text-runway-400 hover:text-white hover:border-white/25 transition-colors"
@@ -267,6 +279,7 @@ export function RoutesScreen() {
                   <span className="text-xs text-runway-400 flex-1 truncate ml-2">
                     {distanceNm > 0 ? `${distanceNm.toLocaleString()} nm loop` : ''}
                     {route.flightTimeMin ? ` · ${formatFlightTime(route.flightTimeMin)}` : ''}
+                    {route.timetable ? ` · 1st dep ${formatMinutes(route.timetable.firstDepartureMin ?? 6 * 60 + 30)} local` : ''}
                   </span>
                 </div>
 

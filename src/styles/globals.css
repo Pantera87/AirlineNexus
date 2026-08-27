@@ -182,6 +182,17 @@ body {
   }
 }
 
+/* Paused game: freeze the route-map CSS animations (planes are rendered statically in JSX) */
+.map-paused .route-arc-dash,
+.map-paused .map-hub-pulse {
+  animation-play-state: paused;
+}
+
+/* Plane markers glide between game-tick positions (the game loop ticks every 1s real time). */
+.map-plane-marker {
+  transition: transform 0.9s linear;
+}
+
 /* Button styles */
 .btn-primary {
   padding: 0.5rem 1rem;

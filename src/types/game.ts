@@ -190,6 +190,8 @@ export interface Route {
   flightTimeMin?: number; // estimated block time in minutes
   demandScore?: number; // 0-100 attractiveness score
   weeksActive?: number; // weeks the route has been operating (drives load-factor ramp-up)
+  /** Generated weekly timetable — hub-local departure/arrival times for every scheduled cycle (see utils/timetable). */
+  timetable?: RouteSchedule;
 }
 
 export interface FlightSchedule {
@@ -197,6 +199,36 @@ export interface FlightSchedule {
   departureTime: string; // HH:MM
   arrivalTime: string; // HH:MM
   flightNumber: string;
+}
+
+// --- Weekly Timetable Types ---
+
+/** One scheduled flight leg of the weekly timetable. Times are in **hub-local** minutes past midnight (0-1439). */
+export interface TimetableLeg {
+  /** 3-char flight number, e.g. "101" (route 1, cycle 1). Full number = airline IATA + this. */
+  flightNumber: string;
+  /** 0=Monday … 6=Sunday (ISO week). */
+  dayIndex: number;
+  fromIata: string;
+  toIata: string;
+  departureMin: number; // hub-local minutes past midnight (0-1439)
+  arrivalMin: number; // hub-local minutes past midnight (0-1439)
+  durationMin: number; // estimated block time
+  distanceNm: number;
+}
+
+/** Generated weekly timetable for a route: one TimetableLeg per flight leg per scheduled cycle. */
+export interface RouteSchedule {
+  routeId: string;
+  /** 1-based position of the route in the airline's routes array when generated (drives flight numbers). */
+  routeSeq: number;
+  frequency: number; // cycles per week at generation time
+  cycleMinutes: number; // full loop cycle time (legs + turnarounds) at generation time
+  aircraftId: string;
+  /** First scheduled departure (hub-local minutes past midnight) — 06:30. Optional: older saves predate this field. */
+  firstDepartureMin?: number;
+  generatedAt: number; // Date.now() at generation
+  legs: TimetableLeg[];
 }
 
 // --- Airline Types ---
@@ -427,6 +459,7 @@ export type Screen =
   | 'dashboard'
   | 'fleet'
   | 'routes'
+  | 'timetable'
   | 'finances'
   | 'fuel'
   | 'staff'

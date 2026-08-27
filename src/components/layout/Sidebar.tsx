@@ -10,6 +10,7 @@ import {
   Globe,
   Bell,
   PlaneTakeoff,
+  CalendarClock,
 } from 'lucide-react';
 import type { MenuItem } from '@/types/game';
 
@@ -17,6 +18,7 @@ const menuItems: MenuItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
   { id: 'fleet', label: 'Fleet', icon: 'fleet' },
   { id: 'routes', label: 'Routes', icon: 'routes' },
+  { id: 'timetable', label: 'Timetable', icon: 'timetable' },
   { id: 'finances', label: 'Finances', icon: 'finances' },
   { id: 'staff', label: 'Staff', icon: 'staff' },
   { id: 'operations', label: 'Operations', icon: 'operations' },
@@ -30,6 +32,7 @@ const iconMap: Record<string, ReactNode> = {
   dashboard: <LayoutDashboard className="w-5 h-5" />,
   fleet: <Plane className="w-5 h-5" />,
   routes: <Map className="w-5 h-5" />,
+  timetable: <CalendarClock className="w-5 h-5" />,
   finances: <DollarSign className="w-5 h-5" />,
   staff: <Users className="w-5 h-5" />,
   operations: <PlaneTakeoff className="w-5 h-5" />,

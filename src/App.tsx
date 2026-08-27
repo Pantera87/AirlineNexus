@@ -6,6 +6,7 @@ import { AirlineSetupScreen } from '@components/screens/AirlineSetupScreen';
 import { DashboardScreen } from '@components/screens/DashboardScreen';
 import { FleetScreen } from '@components/screens/FleetScreen';
 import { RoutesScreen } from '@components/screens/RoutesScreen';
+import { TimetableScreen } from '@components/screens/TimetableScreen';
 import { FinancesScreen } from '@components/screens/FinancesScreen';
 import { FuelScreen } from '@components/screens/FuelScreen';
 import { SettingsScreen } from '@components/screens/SettingsScreen';
@@ -58,6 +59,7 @@ function App() {
             {currentScreen === 'dashboard' && <DashboardScreen />}
             {currentScreen === 'fleet' && <FleetScreen />}
             {currentScreen === 'routes' && <RoutesScreen />}
+            {currentScreen === 'timetable' && <TimetableScreen />}
             {currentScreen === 'finances' && <FinancesScreen />}
             {currentScreen === 'fuel' && <FuelScreen />}
             {currentScreen === 'settings' && <SettingsScreen />}

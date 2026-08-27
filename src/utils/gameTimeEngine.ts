@@ -194,6 +194,7 @@ export class GameTimeEngine {
   getDisplayDateTime(): string {
     const date = this.getCurrentDate();
     return `${date.toLocaleDateString('en-US', { 
+      weekday: 'short',
       month: 'short', 
       day: 'numeric', 
       year: 'numeric' 
