@@ -85,6 +85,38 @@ function settleMonthlyLoansIfDue(currentDate: Date) {
   }
 }
 
+// --- Monthly staff payroll (Staff system) ---
+const SALARY_MONTH_KEY = 'staffPayrollLastMonth';
+
+/**
+ * Settles the monthly staff payroll once per in-game month boundary crossed since the
+ * last tick: pays all salaries (reverting any expired reduced-wage periods to full
+ * market wages) and applies the monthly morale update. The last processed month key
+ * is persisted to localStorage so a page reload does not double-pay (same pattern as
+ * settleMonthlyLoansIfDue). On first run it only records the baseline.
+ */
+function settleMonthlySalariesIfDue(currentDate: Date) {
+  const currentMonthKey = currentDate.getFullYear() * 12 + currentDate.getMonth();
+
+  // Read the raw string: Number(null) is 0, which would defeat the first-run
+  // check and pay a full month of salaries immediately on a fresh game.
+  const storedMonthKey = localStorage.getItem(SALARY_MONTH_KEY);
+  if (storedMonthKey === null || !Number.isFinite(Number(storedMonthKey))) {
+    localStorage.setItem(SALARY_MONTH_KEY, String(currentMonthKey));
+    return;
+  }
+  const lastMonthKey = Number(storedMonthKey);
+
+  if (currentMonthKey > lastMonthKey) {
+    // Month boundary crossed — one payroll per crossing (even after long absences).
+    useGameStore.getState().settleMonthlySalaries();
+    localStorage.setItem(SALARY_MONTH_KEY, String(currentMonthKey));
+  } else if (currentMonthKey < lastMonthKey) {
+    // Game time went backwards (e.g. after a reset): re-baseline without paying.
+    localStorage.setItem(SALARY_MONTH_KEY, String(currentMonthKey));
+  }
+}
+
 // --- Fleet dispatch (automatic per-type aircraft-to-route assignment) ---
 const DAY_MS = WEEK_MS / 7;
 const FLEET_DISPATCH_DAY_KEY = 'fleetDispatchLastDay';
@@ -105,6 +137,7 @@ function dispatchFleetIfDue(currentDate: Date) {
   if (storedDayKey === null || !Number.isFinite(Number(storedDayKey))) {
     // First run (or corrupted value): run an initial dispatch, then record the baseline.
     useGameStore.getState().dispatchFleet();
+    useGameStore.getState().dispatchCrew();
     localStorage.setItem(FLEET_DISPATCH_DAY_KEY, String(currentDayKey));
     return;
   }
@@ -113,6 +146,7 @@ function dispatchFleetIfDue(currentDate: Date) {
   if (currentDayKey > lastDayKey) {
     // Day boundary crossed — one dispatch per crossing (even after long absences).
     useGameStore.getState().dispatchFleet();
+    useGameStore.getState().dispatchCrew();
     localStorage.setItem(FLEET_DISPATCH_DAY_KEY, String(currentDayKey));
   } else if (currentDayKey < lastDayKey) {
     // Game time went backwards (e.g. after a reset): re-baseline without dispatching.
@@ -192,6 +226,9 @@ export function useGameLoop() {
 
         // Phase 4c: process monthly loan payments when an in-game month boundary is crossed
         settleMonthlyLoansIfDue(currentDate);
+
+        // Staff: settle the monthly payroll (salaries + morale + wage reversion) at month boundaries
+        settleMonthlySalariesIfDue(currentDate);
       }, interval);
 
       // Cleanup on unmount or when dependencies change

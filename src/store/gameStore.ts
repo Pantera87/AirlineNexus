@@ -13,6 +13,7 @@ import type {
   WorldState,
   BusinessModel,
   Airport,
+  StaffMember,
 } from '@/types/game';
 import { AIRCRAFT_DATABASE } from '@data/aircraft';
 import { AIRPORT_DATABASE } from '@/data/airports';
@@ -39,6 +40,14 @@ import {
 } from '@/utils/routeEngine';
 import { computeDispatchPlan } from '@/utils/fleetDispatcher';
 import type { RouteStaffing } from '@/utils/fleetDispatcher';
+import { computeCrewPlan, getCrewCoverageFactor } from '@/utils/crewDispatcher';
+import {
+  applyPromotion,
+  convertTypeRating as applyTypeConversion,
+  settleMonthlyPayroll,
+  accrueWeeklyFlyingHours,
+  getPromotionEligibility,
+} from '@/utils/staffEngine';
 import { generateTimetable, needsTimetableRegeneration } from '@/utils/timetable';
 import { GameTimeRepository } from '@/database/repositories/gameTime.repository';
 
@@ -152,6 +161,16 @@ interface GameStore extends GameState {
    * charges one-time positioning costs, and refreshes the weekly plan.
    */
   dispatchFleet: () => { dispatched: number; released: number; shortfalls: RouteStaffing[]; totalPositionCost: number } | null;
+
+  // Staff management (My Staff / Hiring screens)
+  hireStaff: (candidate: Omit<StaffMember, 'id' | 'startDate'>) => { success: boolean; message: string };
+  fireStaff: (staffId: string) => { success: boolean; message: string };
+  promoteStaff: (staffId: string) => { success: boolean; message: string };
+  convertTypeRating: (staffId: string, newTypeId: string) => { success: boolean; message: string };
+  /** Apply the pure crew plan (utils/crewDispatcher) to staff assignments. */
+  dispatchCrew: () => { staffed: number; released: number } | null;
+  /** Monthly payroll + morale update + reduced-wage reversion (game loop, month boundaries). */
+  settleMonthlySalaries: () => { totalSalary: number; headCount: number; reversionCount: number } | null;
 
   // Loan management
   payoffLoan: (loanId: string) => { success: boolean; message: string };
@@ -617,6 +636,236 @@ export const useGameStore = create<GameStore>()(
         };
       },
 
+      // --- Staff management ----------------------------------------------------
+      // Pure planning logic lives in utils/staffEngine.ts + utils/crewDispatcher.ts;
+      // these actions validate against game state, apply the results, and notify.
+
+      hireStaff: (candidate) => {
+        const state = get();
+        const airline = state.airline;
+        if (!airline) return { success: false, message: 'No active airline' };
+
+        const member: StaffMember = {
+          ...candidate,
+          id: generateId('staff'),
+          startDate: new Date(state.currentDate),
+        };
+
+        set({
+          airline: {
+            ...airline,
+            staff: [...(airline.staff ?? []), member],
+          },
+        });
+
+        // A new hire may immediately fill a crew gap — re-dispatch crew.
+        get().dispatchCrew();
+
+        return { success: true, message: `${member.name} joined as ${member.role}.` };
+      },
+
+      fireStaff: (staffId) => {
+        const state = get();
+        const currency = state.settings.currencyFormat;
+        const airline = state.airline;
+        if (!airline) return { success: false, message: 'No active airline' };
+
+        const staff = airline.staff ?? [];
+        const member = staff.find((m) => m.id === staffId);
+        if (!member) return { success: false, message: 'Staff member not found' };
+
+        // Severance: one month's salary, only if we can pay it out of cash.
+        const severance = member.salary;
+        if (airline.finances.cash < severance) {
+          return {
+            success: false,
+            message: `Insufficient funds for severance (${formatCurrency(severance, currency)}). Cash: ${formatCurrency(airline.finances.cash, currency)}.`,
+          };
+        }
+
+        set({
+          airline: {
+            ...airline,
+            staff: staff.filter((m) => m.id !== staffId),
+            finances: {
+              ...airline.finances,
+              cash: airline.finances.cash - severance,
+              totalExpenses: airline.finances.totalExpenses + severance,
+              netWorth: airline.finances.netWorth - severance,
+            },
+          },
+        });
+
+        get().dispatchCrew(); // freed slots may be re-staffed
+
+        return { success: true, message: `${member.name} was let go (severance ${formatCurrency(severance, currency)}).` };
+      },
+
+      promoteStaff: (staffId) => {
+        const state = get();
+        const currency = state.settings.currencyFormat;
+        const airline = state.airline;
+        if (!airline) return { success: false, message: 'No active airline' };
+
+        const staff = airline.staff ?? [];
+        const member = staff.find((m) => m.id === staffId);
+        if (!member) return { success: false, message: 'Staff member not found' };
+
+        const eligibility = getPromotionEligibility(member);
+        if (!eligibility) return { success: false, message: 'No promotion path for this role.' };
+        if (!eligibility.eligible) return { success: false, message: `Not eligible: ${eligibility.reasons.join('; ')}.` };
+        if (airline.finances.cash < eligibility.cost) {
+          return {
+            success: false,
+            message: `Insufficient funds for the promotion fee (${formatCurrency(eligibility.cost, currency)}).`,
+          };
+        }
+
+        const promoted = applyPromotion(member, eligibility.newRole);
+        set({
+          airline: {
+            ...airline,
+            staff: staff.map((m) => (m.id === staffId ? promoted : m)),
+            finances: {
+              ...airline.finances,
+              cash: airline.finances.cash - eligibility.cost,
+              totalExpenses: airline.finances.totalExpenses + eligibility.cost,
+              netWorth: airline.finances.netWorth - eligibility.cost,
+            },
+          },
+        });
+
+        // A promoted pilot's old crew slot is now vacant — re-dispatch.
+        get().dispatchCrew();
+
+        if (state.settings.notificationsEnabled) {
+          get().addNotification({
+            type: 'success',
+            title: 'Promotion',
+            message: `${promoted.name} was promoted to ${eligibility.newRole} (fee ${formatCurrency(eligibility.cost, currency)}).`,
+          });
+        }
+
+        return { success: true, message: `${promoted.name} promoted to ${eligibility.newRole}.` };
+      },
+
+      convertTypeRating: (staffId, newTypeId) => {
+        const state = get();
+        const currency = state.settings.currencyFormat;
+        const airline = state.airline;
+        if (!airline) return { success: false, message: 'No active airline' };
+
+        const staff = airline.staff ?? [];
+        const member = staff.find((m) => m.id === staffId);
+        if (!member) return { success: false, message: 'Staff member not found' };
+
+        const result = applyTypeConversion(member, newTypeId);
+        if (!result.ok) return { success: false, message: result.reason };
+        if (airline.finances.cash < result.cost) {
+          return {
+            success: false,
+            message: `Insufficient funds for the type rating (${formatCurrency(result.cost, currency)}).`,
+          };
+        }
+
+        const updated = result.updated!;
+        set({
+          airline: {
+            ...airline,
+            staff: staff.map((m) => (m.id === staffId ? updated : m)),
+            finances: {
+              ...airline.finances,
+              cash: airline.finances.cash - result.cost,
+              totalExpenses: airline.finances.totalExpenses + result.cost,
+              netWorth: airline.finances.netWorth - result.cost,
+            },
+          },
+        });
+
+        // The rating changed — re-run the crew plan so the pilot is matched to
+        // aircraft they can (now) fly.
+        get().dispatchCrew();
+
+        const typeName = AIRCRAFT_DATABASE.find((t) => t.id === newTypeId)?.name ?? newTypeId;
+        if (state.settings.notificationsEnabled) {
+          get().addNotification({
+            type: 'success',
+            title: 'Type rating acquired',
+            message: `${updated.name} is now rated for the ${typeName} (${formatCurrency(result.cost, currency)}).`,
+          });
+        }
+
+        return { success: true, message: `${updated.name} rated for ${typeName}.` };
+      },
+
+      dispatchCrew: () => {
+        const state = get();
+        const airline = state.airline;
+        if (!airline) return null;
+
+        const staff = airline.staff ?? [];
+        const plan = computeCrewPlan(staff, airline.fleet ?? []);
+        if (!plan.changed) return { staffed: 0, released: 0 };
+
+        const nextStaff = staff.map((m) => {
+          if (!plan.assignments.has(m.id)) return m;
+          return { ...m, assignedAircraft: plan.assignments.get(m.id)! };
+        });
+
+        set({
+          airline: {
+            ...airline,
+            staff: nextStaff,
+          },
+        });
+
+        // Manning changed → route economics (coverage factor) must be refreshed.
+        get().settleWeeklyRoutes({ boundary: false });
+
+        return { staffed: plan.totalStaffed, released: plan.totalReleased };
+      },
+
+      settleMonthlySalaries: () => {
+        const state = get();
+        const currency = state.settings.currencyFormat;
+        const airline = state.airline;
+        if (!airline) return null;
+
+        const staff = airline.staff ?? [];
+        if (staff.length === 0) return { totalSalary: 0, headCount: 0, reversionCount: 0 };
+
+        const { staff: nextStaff, totalSalary, reversionCount } = settleMonthlyPayroll(staff, state.currentDate);
+
+        set({
+          airline: {
+            ...airline,
+            staff: nextStaff,
+            finances: {
+              ...airline.finances,
+              cash: airline.finances.cash - totalSalary,
+              totalExpenses: airline.finances.totalExpenses + totalSalary,
+              netWorth: airline.finances.netWorth - totalSalary,
+            },
+          },
+        });
+
+        if (state.settings.notificationsEnabled) {
+          const parts = [
+            `${staff.length} staff member${staff.length === 1 ? '' : 's'} paid ${formatCurrency(totalSalary, currency)}`,
+          ];
+          if (reversionCount > 0) {
+            parts.push(`${reversionCount} reduced-wage period${reversionCount === 1 ? '' : 's'} reverted to full market wage`);
+          }
+          get().addNotification({
+            type: airline.finances.cash - totalSalary < 0 ? 'warning' : 'info',
+            title: 'Monthly salaries paid',
+            message: `${parts.join('. ')}.`,
+          });
+        }
+
+        return { totalSalary, headCount: staff.length, reversionCount };
+      },
+
       // Loan management
       payoffLoan: (loanId) => {
         const state = get();
@@ -1053,6 +1302,9 @@ export const useGameStore = create<GameStore>()(
             (neededHoursByType.get(route.aircraftId) ?? 0) + route.frequency * cycleHours
           );
         }
+        // Crew manning: under-crewed types can't fly — their operations scale down by the
+        // coverage factor (rated-vs-requirement, or a flat 0.5 for unrated coverage).
+        const crewPlan = computeCrewPlan(airline.staff ?? [], airline.fleet ?? []);
         const utilizationFactor = (typeId: string): number => {
           const needed = neededHoursByType.get(typeId) ?? 0;
           if (needed <= 0) return 1;
@@ -1062,7 +1314,8 @@ export const useGameStore = create<GameStore>()(
           const usable = usableCountByType.get(typeId) ?? 0;
           if (usable === 0) return 0;
           const capacity = usable * DAILY_DUTY_HOURS * 7;
-          return Math.min(1, capacity / needed);
+          const fleetFactor = Math.min(1, capacity / needed);
+          return fleetFactor * getCrewCoverageFactor(crewPlan, typeId);
         };
 
         const updatedRoutes = airline.routes.map((route) => {
@@ -1120,13 +1373,42 @@ export const useGameStore = create<GameStore>()(
         });
 
         // Fixed fleet costs: every owned aircraft incurs maintenance/depreciation/insurance each week,
-        // whether or not it is assigned to a route.
+        // whether or not it is assigned to a route. An engineer staffing shortfall raises
+        // maintenance costs (each missing engineer adds up to 10%, capped at +50%).
+        const engineerPenalty = 1 + Math.min(0.5, crewPlan.engineerShortfall * 0.1);
         for (const ac of airline.fleet ?? []) {
           const type = findAircraftById(ac.typeId);
-          if (type) totalCosts += getAircraftWeeklyFixedCosts(type);
+          if (type) totalCosts += getAircraftWeeklyFixedCosts(type) * engineerPenalty;
         }
 
         const totalProfit = totalRevenue - totalCosts;
+
+        // Weekly flying-hours accrual (real week boundaries only): each pilot's assigned
+        // aircraft types contribute that type's required cycle hours, shared among the
+        // pilots staffed on them and capped by the weekly duty limit.
+        let staffWithHours: StaffMember[] | null = null;
+        if (boundary) {
+          const staff = airline.staff ?? [];
+          const staffedIdsByType = new Map<string, Set<string>>();
+          for (const m of staff) {
+            if (m.role !== 'captain' && m.role !== 'first-officer') continue;
+            const ac = (airline.fleet ?? []).find((a) => a.id === m.assignedAircraft);
+            if (!ac) continue;
+            const ids = staffedIdsByType.get(ac.typeId) ?? new Set<string>();
+            ids.add(m.id);
+            staffedIdsByType.set(ac.typeId, ids);
+          }
+          const hoursById = new Map<string, number>();
+          for (const [typeId, hours] of neededHoursByType) {
+            const ids = staffedIdsByType.get(typeId);
+            if (!ids || hours <= 0) continue;
+            const pilots = staff.filter((m) => ids.has(m.id));
+            for (const u of accrueWeeklyFlyingHours(pilots, hours)) hoursById.set(u.id, u.flightHours);
+          }
+          if (hoursById.size > 0) {
+            staffWithHours = staff.map((m) => (hoursById.has(m.id) ? { ...m, flightHours: hoursById.get(m.id)! } : m));
+          }
+        }
 
         // Store the plan so accrueFinances() can stream this week's economics into cash.
         // No lump-sum cash change happens here — cash now moves continuously per tick.
@@ -1134,6 +1416,7 @@ export const useGameStore = create<GameStore>()(
           airline: {
             ...airline,
             routes: updatedRoutes,
+            ...(staffWithHours ? { staff: staffWithHours } : {}),
             finances: {
               ...airline.finances,
               weeklyPlan: { revenue: totalRevenue, costs: totalCosts },

@@ -307,6 +307,8 @@ export interface Investment {
 export interface StaffMember {
   id: string;
   name: string;
+  gender: 'male' | 'female'; // picks the portrait pool in public/staff-photos/{male,female}
+  photo: string | null; // public portrait path (e.g. /staff-photos/male/07.png); null/missing = initials avatar
   role: StaffRole;
   experience: number; // years
   salary: number; // monthly
@@ -314,16 +316,20 @@ export interface StaffMember {
   assignedAircraft: string | null;
   assignedRoute: string | null;
   startDate: Date;
+  morale: number; // 0-100 — driven by the morale factor registry (staffEngine.applyMonthlyMoraleUpdate)
+  flightHours: number; // flying hours (pilots only; 0 for other roles)
+  /** Single ACTIVE type rating (pilots only). null = not rated at all — can only fly after a paid conversion. */
+  typeRating: string | null;
+  /** End of the reduced-wage period for unrated pilot hires (timestamp ms); null = no active period. */
+  reducedWageUntil: number | null;
 }
 
-export type StaffRole = 
+export type StaffRole =
   | 'captain'
   | 'first-officer'
+  | 'purser'
   | 'cabin-crew'
-  | 'mechanic'
-  | 'ground-staff'
-  | 'dispatcher'
-  | 'manager';
+  | 'engineer';
 
 // --- Loyalty Program Types ---
 

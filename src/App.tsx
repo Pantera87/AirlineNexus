@@ -4,6 +4,7 @@ import { WelcomeScreen } from '@components/screens/WelcomeScreen';
 import { AirlineSetupScreen } from '@components/screens/AirlineSetupScreen';
 import { DashboardScreen } from '@components/screens/DashboardScreen';
 import { FleetScreen } from '@components/screens/FleetScreen';
+import { StaffScreen } from '@components/screens/StaffScreen';
 import { RoutesScreen } from '@components/screens/RoutesScreen';
 import { TimetableScreen } from '@components/screens/TimetableScreen';
 import { FinancesScreen } from '@components/screens/FinancesScreen';
@@ -63,7 +64,8 @@ function App() {
       {currentScreen === 'notifications' && <NotificationsScreen />}
       {currentScreen === 'world' && <WorldView />}
       {currentScreen === 'fleet-marketplace' && <FleetMarketplace />}
-      {(currentScreen === 'staff' || currentScreen === 'operations' || currentScreen === 'alliances' || currentScreen === 'events') && (
+      {currentScreen === 'staff' && <StaffScreen />}
+      {(currentScreen === 'operations' || currentScreen === 'alliances' || currentScreen === 'events') && (
         <div className='h-full flex items-center justify-center'>
           <div className='text-center'>
             <h2 className='text-2xl font-bold text-white mb-2'>Coming Soon</h2>
