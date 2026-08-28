@@ -30,7 +30,6 @@ export interface AircraftType {
   
   weeklyLeaseCost?: number; // USD (optional, for leasing)
   era: number; // year introduced (legacy alias of firstDeliveryYear)
-  imageKey: string;
   
   inProduction?: boolean; // true if currently manufactured (Buy New tab eligibility)
   productionEndYear?: number; // when production ended (for legacy aircraft)
@@ -266,9 +265,25 @@ export interface Finances {
   netWorth: number;
   /** Weekly operations plan currently being accrued continuously (recomputed at each week boundary and on route/fleet changes). */
   weeklyPlan?: { revenue: number; costs: number };
+  /**
+   * Weekly cash/finance history log — most recent last, capped at 52 points.
+   * Appended once per real in-game week boundary (mirrors world.fuelPriceHistory).
+   * Optional: old saves predate this field and charts simply start empty.
+   */
+  history?: FinanceHistoryPoint[];
+  /** Revenue/expenses accrued during the current in-game month (consumed by monthly report generation). */
+  monthlyAccrual?: { revenue: number; expenses: number };
   monthlyReports: MonthlyReport[];
   loans: Loan[];
   investments: Investment[];
+}
+
+/** One point of the weekly finance history log. */
+export interface FinanceHistoryPoint {
+  date: string; // ISO date of the week boundary
+  cash: number; // cash balance at that moment
+  revenue: number; // weekly plan revenue for the upcoming week
+  costs: number; // weekly plan costs for the upcoming week
 }
 
 export interface MonthlyReport {
@@ -448,6 +463,10 @@ export interface Notification {
   isRead: boolean;
 }
 
+// Unit system for display formatting. All game math stays in nautical miles /
+// knots; this only controls how values are presented (km vs nm, and later °C vs °F).
+export type UnitSystem = 'metric' | 'imperial';
+
 export interface GameSettings {
   notificationsEnabled: boolean;
   soundEnabled: boolean;
@@ -455,6 +474,7 @@ export interface GameSettings {
   showTooltips: boolean;
   currencyFormat: 'USD' | 'EUR' | 'GBP';
   dateFormat: 'US' | 'EU';
+  units: UnitSystem;
 }
 
 // --- UI/Navigation Types ---

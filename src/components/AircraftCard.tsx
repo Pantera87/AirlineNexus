@@ -4,8 +4,8 @@ import { useGameStore } from '../store/gameStore';
 import { formatCurrency } from '../utils/helpers';
 import { type AircraftListing, ConditionGrade } from '../types/game';
 import { AIRCRAFT_TYPES } from '../data/aircraft-types';
-import { AIRCRAFT_DATABASE } from '../data/aircraft';
-import AircraftImage from './AircraftImage';
+import { useUnits, formatDistanceKm, formatSpeedKmh } from '../utils/units';
+
 
 interface AircraftCardProps {
   listing: AircraftListing;
@@ -15,34 +15,23 @@ export default function AircraftCard({ listing }: AircraftCardProps) {
   const [isHovered, setIsHovered] = useState(false);
   const { selectListing } = useFleetStore();
   const currencyFormat = useGameStore((state) => state.settings.currencyFormat);
+  const units = useUnits();
+
 
   // Get aircraft type details
   const aircraftType = AIRCRAFT_TYPES[listing.aircraftTypeId];
 
   if (!aircraftType) return null;
 
-  // Find matching imageKey from the database (bridges naming conventions)
-  const dbMatch = AIRCRAFT_DATABASE.find(
-    (db) =>
-      db.name.toLowerCase().replace(/[^a-z0-9]/g, '') ===
-      `${aircraftType.manufacturer} ${aircraftType.model}`.toLowerCase().replace(/[^a-z0-9]/g, '')
-  );
-
   return (
     <button
       onClick={() => selectListing(listing.id)}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      className={`aircraft-card-glass w-full aspect-[3/4] p-6 text-left transition-all duration-300 ${isHovered ? 'scale-[1.02]' : ''}`}
+      className={`aircraft-card-glass w-full p-4 text-left transition-all duration-300 ${isHovered ? 'scale-[1.02]' : ''}`}
     >
-      {/* Aircraft image */}
-      <AircraftImage
-        keyOrId={dbMatch?.imageKey || aircraftType.id}
-        fallbackKeys={[aircraftType.id]}
-        alt={`${aircraftType.manufacturer} ${aircraftType.model}`}
-        className="mb-4 w-full aspect-[16/9] rounded-lg"
-        fit="contain"
-      />
+      {/* Aircraft artwork (placeholder for real photo) */}
+      <div className="mb-3 w-full aspect-[16/9] rounded-lg bg-gradient-to-br from-sky-900/40 via-runway-800/60 to-blue-900/40" />
 
       {/* Manufacturer badge */}
       <div className="manufacturer-badge inline-block px-3 py-1 rounded-full text-xs font-medium mb-2">
@@ -50,18 +39,18 @@ export default function AircraftCard({ listing }: AircraftCardProps) {
       </div>
 
       {/* Model name and category */}
-      <h3 className="text-xl font-bold text-white mb-1">{aircraftType.model}</h3>
-      <p className="text-sm text-blue-300 mb-4 capitalize">
+      <h3 className="text-lg font-bold text-white mb-0.5">{aircraftType.model}</h3>
+      <p className="text-xs text-blue-300 mb-3 capitalize">
         {getCategoryDisplay(aircraftType.category)} • {aircraftType.seatsEconomy} seats
       </p>
 
       {/* Key specs */}
-      <div className="grid grid-cols-3 gap-2 text-xs text-gray-300 mb-4">
+      <div className="grid grid-cols-3 gap-2 text-[11px] text-gray-300">
         <div>
-          <span className="font-medium">Range:</span> {formatNumber(aircraftType.rangeKm)} km
+          <span className="font-medium">Range:</span> {formatDistanceKm(aircraftType.rangeKm, units)}
         </div>
         <div>
-          <span className="font-medium">Speed:</span> {formatNumber(aircraftType.cruiseSpeedKmh)} km/h
+          <span className="font-medium">Speed:</span> {formatSpeedKmh(aircraftType.cruiseSpeedKmh, units)}
         </div>
         <div>
           <span className="font-medium">Price:</span> {formatCurrency(listing.price, currencyFormat)}
@@ -114,9 +103,4 @@ function formatCondition(condition: ConditionGrade): string {
   return formatted.charAt(0).toUpperCase() + formatted.slice(1);
 }
 
-function formatNumber(num: number): string {
-  if (num >= 1000) {
-    return (num / 1000).toFixed(0) + 'K';
-  }
-  return num.toString();
-}
+

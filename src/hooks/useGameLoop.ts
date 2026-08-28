@@ -117,6 +117,34 @@ function settleMonthlySalariesIfDue(currentDate: Date) {
   }
 }
 
+// --- Monthly finance report (Phase 4d) ---
+const REPORT_MONTH_KEY = 'monthlyReportLastMonth';
+
+/**
+ * Generates the monthly finance report once per in-game month boundary crossed since the
+ * last tick (same localStorage month-key pattern as settleMonthlyLoansIfDue). On first run
+ * it only records the baseline, so a fresh game's first partial month is not reported.
+ */
+function settleMonthlyReportIfDue(currentDate: Date) {
+  const currentMonthKey = currentDate.getFullYear() * 12 + currentDate.getMonth();
+
+  const storedMonthKey = localStorage.getItem(REPORT_MONTH_KEY);
+  if (storedMonthKey === null || !Number.isFinite(Number(storedMonthKey))) {
+    localStorage.setItem(REPORT_MONTH_KEY, String(currentMonthKey));
+    return;
+  }
+  const lastMonthKey = Number(storedMonthKey);
+
+  if (currentMonthKey > lastMonthKey) {
+    // Run AFTER payroll/loan settlement for this boundary so the accrual covers the ended month.
+    useGameStore.getState().generateMonthlyReport();
+    localStorage.setItem(REPORT_MONTH_KEY, String(currentMonthKey));
+  } else if (currentMonthKey < lastMonthKey) {
+    // Game time went backwards (e.g. after a reset): re-baseline.
+    localStorage.setItem(REPORT_MONTH_KEY, String(currentMonthKey));
+  }
+}
+
 // --- Fleet dispatch (automatic per-type aircraft-to-route assignment) ---
 const DAY_MS = WEEK_MS / 7;
 const FLEET_DISPATCH_DAY_KEY = 'fleetDispatchLastDay';
@@ -229,6 +257,9 @@ export function useGameLoop() {
 
         // Staff: settle the monthly payroll (salaries + morale + wage reversion) at month boundaries
         settleMonthlySalariesIfDue(currentDate);
+
+        // Phase 4d: generate the monthly finance report at month boundaries
+        settleMonthlyReportIfDue(currentDate);
       }, interval);
 
       // Cleanup on unmount or when dependencies change

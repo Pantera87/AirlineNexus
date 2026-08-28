@@ -26,6 +26,7 @@ import {
 } from '@/utils/routeEngine';
 import { getRequiredAircraftCount, getPoolStats, getRouteStaffing } from '@/utils/fleetDispatcher';
 import { formatMinutes } from '@/utils/timetable';
+import { useUnits, formatDistanceNm } from '@/utils/units';
 
 /** Fallback frequency options when no aircraft type / distance is known yet (up to 4x/day). */
 const FALLBACK_FREQUENCY_OPTIONS: { value: number; label: string }[] = [1, 2, 3, 4].map((d) => ({
@@ -83,6 +84,7 @@ function formatFrequency(frequencyPerWeek: number): string {
 export function RoutesScreen() {
   const airline = useGameStore((state) => state.airline);
   const currencyFormat = useGameStore((state) => state.settings.currencyFormat);
+  const units = useUnits();
   const addNotification = useGameStore((state) => state.addNotification);
   const createRoute = useGameStore((state) => state.createRoute);
   const updateRoute = useGameStore((state) => state.updateRoute);
@@ -277,7 +279,7 @@ export function RoutesScreen() {
                     {route.origin}
                   </span>
                   <span className="text-xs text-runway-400 flex-1 truncate ml-2">
-                    {distanceNm > 0 ? `${distanceNm.toLocaleString()} nm loop` : ''}
+                    {distanceNm > 0 ? `${formatDistanceNm(distanceNm, units)} loop` : ''}
                     {route.flightTimeMin ? ` · ${formatFlightTime(route.flightTimeMin)}` : ''}
                     {route.timetable ? ` · 1st dep ${formatMinutes(route.timetable.firstDepartureMin ?? 6 * 60 + 30)} local` : ''}
                   </span>
@@ -478,6 +480,7 @@ function RouteCreationForm({
   const [showStopPicker, setShowStopPicker] = useState(false);
   // Live market fuel price — route costs track the dynamic fuel market.
   const fuelPricePerKg = useGameStore((state) => state.world.fuelPrice);
+  const units = useUnits();
 
   const hubAirport = useMemo(() => (hubIata ? getAirportByIata(hubIata) : undefined), [hubIata]);
   // Full loop path: HUB → stops… → DEST. The return leg to the hub is implicit in all loop math.
@@ -598,7 +601,7 @@ function RouteCreationForm({
       {distanceNm !== null && (
         <div className="flex items-center gap-3 text-sm">
           <span className="text-runway-400">{isMultiHop ? 'Loop distance:' : 'Distance:'}</span>
-          <span className="font-semibold text-white">{distanceNm.toLocaleString()} nm</span>
+          <span className="font-semibold text-white">{formatDistanceNm(distanceNm, units)}</span>
           {flightTimeMin !== null && (
             <>
               <span className="text-runway-500">·</span>
@@ -638,7 +641,7 @@ function RouteCreationForm({
                 </>
               )}
               <span className="text-runway-500 text-xs ml-auto">
-                {rangeCheck.totalDistanceNm.toLocaleString()} nm loop · {getEffectiveRangeNm(aircraftType).toLocaleString()} nm usable per leg
+                {formatDistanceNm(rangeCheck.totalDistanceNm, units)} loop · {formatDistanceNm(getEffectiveRangeNm(aircraftType), units)} usable per leg
               </span>
             </div>
             <div className="space-y-1">
@@ -650,7 +653,7 @@ function RouteCreationForm({
                     <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
                   )}
                   <span className={leg.feasible ? 'text-runway-300' : 'text-red-400'}>
-                    {leg.from} → {leg.to} · {leg.distanceNm.toLocaleString()} nm
+                    {leg.from} → {leg.to} · {formatDistanceNm(leg.distanceNm, units)}
                   </span>
                 </div>
               ))}
@@ -746,7 +749,7 @@ function RouteCreationForm({
                 >
                   <span className="font-semibold">{s.airport.iata}</span>
                   <span className="text-runway-400"> · {s.airport.city}</span>
-                  <span className="text-runway-500"> · {s.distanceNm.toLocaleString()} nm</span>
+                  <span className="text-runway-500"> · {formatDistanceNm(s.distanceNm, units)}</span>
                   <span className="text-sky-400"> · demand {s.demandScore}</span>
                 </button>
               );
@@ -781,6 +784,7 @@ interface RouteDetailModalProps {
 
 function RouteDetailModal({ route, ownedTypeIds, currencyFormat, onClose, onSave, onToggleActive, onCancel }: RouteDetailModalProps) {
   const fuelPricePerKg = useGameStore((state) => state.world.fuelPrice);
+  const units = useUnits();
   const fleet = useGameStore((state) => state.airline?.fleet);
   const [frequency, setFrequency] = useState(route.frequency);
   const [aircraftTypeId, setAircraftTypeId] = useState(route.aircraftId || '');
@@ -906,7 +910,7 @@ function RouteDetailModal({ route, ownedTypeIds, currencyFormat, onClose, onSave
                   </>
                 )}
                 <span className="text-runway-500 text-xs ml-auto">
-                  {rangeCheck.totalDistanceNm.toLocaleString()} nm loop · {getEffectiveRangeNm(aircraftType).toLocaleString()} nm usable per leg
+                  {formatDistanceNm(rangeCheck.totalDistanceNm, units)} loop · {formatDistanceNm(getEffectiveRangeNm(aircraftType), units)} usable per leg
                 </span>
               </div>
               <div className="space-y-1">
@@ -918,7 +922,7 @@ function RouteDetailModal({ route, ownedTypeIds, currencyFormat, onClose, onSave
                       <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
                     )}
                     <span className={leg.feasible ? 'text-runway-300' : 'text-red-400'}>
-                      {leg.from} → {leg.to} · {leg.distanceNm.toLocaleString()} nm
+                      {leg.from} → {leg.to} · {formatDistanceNm(leg.distanceNm, units)}
                     </span>
                   </div>
                 ))}
@@ -938,7 +942,7 @@ function RouteDetailModal({ route, ownedTypeIds, currencyFormat, onClose, onSave
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="rounded-lg bg-white/[0.03] border border-white/5 p-3">
             <p className="text-xs text-runway-500">{(route.stops?.length ?? 0) > 0 ? 'Loop Distance' : 'Distance'}</p>
-            <p className="text-sm font-medium text-white">{distanceNm > 0 ? `${distanceNm.toLocaleString()} nm` : '—'}</p>
+            <p className="text-sm font-medium text-white">{distanceNm > 0 ? formatDistanceNm(distanceNm, units) : '—'}</p>
           </div>
           <div className="rounded-lg bg-white/[0.03] border border-white/5 p-3">
             <p className="text-xs text-runway-500">Flight Time</p>

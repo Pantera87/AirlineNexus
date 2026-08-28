@@ -14,6 +14,8 @@ import type {
   BusinessModel,
   Airport,
   StaffMember,
+  MonthlyReport,
+  FinanceHistoryPoint,
 } from '@/types/game';
 import { AIRCRAFT_DATABASE } from '@data/aircraft';
 import { AIRPORT_DATABASE } from '@/data/airports';
@@ -53,6 +55,20 @@ import { GameTimeRepository } from '@/database/repositories/gameTime.repository'
 
 // In-game milliseconds per week (one in-game day is 24 hours of simulated time).
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Average number of weeks in an in-game month (52 weeks / 12 months). */
+export const WEEKS_PER_MONTH = 52 / 12;
+
+/** Max points kept in the weekly finance history log. */
+const FINANCE_HISTORY_CAP = 52;
+
+/** Append a point to the weekly finance history log, keeping the cap (most recent last). */
+function pushFinanceHistory(
+  history: FinanceHistoryPoint[] | undefined,
+  point: FinanceHistoryPoint
+): FinanceHistoryPoint[] {
+  return [...(history ?? []), point].slice(-FINANCE_HISTORY_CAP);
+}
 
 /** Resolve a route's full loop path (HUB → stops… → DEST) to airport objects, or null if any IATA is unknown. */
 function resolveRoutePathAirports(route: Route): Airport[] | null {
@@ -107,6 +123,7 @@ const defaultSettings: GameSettings = {
   showTooltips: true,
   currencyFormat: 'USD',
   dateFormat: 'US',
+  units: 'imperial',
 };
 
 // Initial game state
@@ -210,6 +227,11 @@ interface GameStore extends GameState {
 
   // Monthly loan servicing (Phase 4c) — called by the game loop on month boundaries.
   settleMonthlyLoans: () => { settledPayments: number; totalPaid: number } | null;
+
+  // Monthly report (Phase 4d) — called by the game loop on month boundaries. Builds a
+  // MonthlyReport from the revenue/expenses accrued during the month that just ended
+  // (finances.monthlyAccrual) and appends it to finances.monthlyReports.
+  generateMonthlyReport: () => MonthlyReport | null;
 
   // Reset
   resetGame: () => Promise<void>;
@@ -1264,7 +1286,18 @@ export const useGameStore = create<GameStore>()(
 
         // No routes at all: nothing operates, so stream no cash and clear any stale plan.
         if (airline.routes.length === 0) {
-          set({ airline: { ...airline, finances: { ...airline.finances, weeklyPlan: { revenue: 0, costs: 0 } } } });
+          set({
+            airline: {
+              ...airline,
+              finances: {
+                ...airline.finances,
+                weeklyPlan: { revenue: 0, costs: 0 },
+                ...(boundary
+                  ? { history: pushFinanceHistory(airline.finances.history, { date: state.currentDate.toISOString(), cash: airline.finances.cash, revenue: 0, costs: 0 }) }
+                  : {}),
+              },
+            },
+          });
           return null;
         }
 
@@ -1412,6 +1445,7 @@ export const useGameStore = create<GameStore>()(
 
         // Store the plan so accrueFinances() can stream this week's economics into cash.
         // No lump-sum cash change happens here — cash now moves continuously per tick.
+        // At real boundaries, also append the weekly finance history point (cash + plan).
         set({
           airline: {
             ...airline,
@@ -1420,6 +1454,9 @@ export const useGameStore = create<GameStore>()(
             finances: {
               ...airline.finances,
               weeklyPlan: { revenue: totalRevenue, costs: totalCosts },
+              ...(boundary
+                ? { history: pushFinanceHistory(airline.finances.history, { date: state.currentDate.toISOString(), cash: airline.finances.cash, revenue: totalRevenue, costs: totalCosts }) }
+                : {}),
             },
           },
         });
@@ -1458,6 +1495,7 @@ export const useGameStore = create<GameStore>()(
         const revenue = plan.revenue * fraction;
         const costs = plan.costs * fraction;
         const net = revenue - costs;
+        const monthlyAccrual = airline.finances.monthlyAccrual ?? { revenue: 0, expenses: 0 };
 
         set({
           airline: {
@@ -1469,6 +1507,8 @@ export const useGameStore = create<GameStore>()(
               totalExpenses: airline.finances.totalExpenses + costs,
               profit: airline.finances.profit + net,
               netWorth: airline.finances.netWorth + net,
+              // Running month totals (Phase 4d) — consumed by generateMonthlyReport() at month boundaries.
+              monthlyAccrual: { revenue: monthlyAccrual.revenue + revenue, expenses: monthlyAccrual.expenses + costs },
             },
           },
         });
@@ -1527,6 +1567,73 @@ export const useGameStore = create<GameStore>()(
         return { settledPayments, totalPaid };
       },
 
+      // Monthly report (Phase 4d) — called by the game loop on month boundaries. Builds a
+      // MonthlyReport from the revenue/expenses accrued during the month that just ended
+      // (finances.monthlyAccrual, maintained by accrueFinances) plus route-level load factor
+      // and passenger estimates, then appends it to finances.monthlyReports (capped at 24).
+      generateMonthlyReport: () => {
+        const state = get();
+        const airline = state.airline;
+        if (!airline) return null;
+
+        const accrual = airline.finances.monthlyAccrual ?? { revenue: 0, expenses: 0 };
+        // Nothing accrued this month (no routes operating): skip rather than log a zero report.
+        if (accrual.revenue <= 0 && accrual.expenses <= 0) return null;
+
+        const activeRoutes = airline.routes.filter((r) => r.isActive);
+        const routeRevenueTotal = activeRoutes.reduce((sum, r) => sum + r.revenue, 0);
+        const loadFactor =
+          routeRevenueTotal > 0
+            ? activeRoutes.reduce((sum, r) => sum + (r.avgLoadFactor || 0) * r.revenue, 0) / routeRevenueTotal
+            : activeRoutes.length > 0
+              ? activeRoutes.reduce((sum, r) => sum + (r.avgLoadFactor || 0), 0) / activeRoutes.length
+              : 0;
+
+        // Monthly passenger estimate: seats × load factor × legs × frequency, scaled to a month.
+        let weeklyPassengers = 0;
+        for (const r of activeRoutes) {
+          const type = findAircraftById(r.aircraftId);
+          if (!type) continue;
+          const legs = (r.stops?.length ?? 0) + 2; // hub→…→dest→hub: one return leg per outward leg
+          weeklyPassengers += type.maxPassengers * (r.avgLoadFactor || 0) * legs * r.frequency;
+        }
+
+        // The boundary date is the first moment of the NEW month — the report covers the month just ended.
+        const now = new Date(state.currentDate);
+        const month = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const report: MonthlyReport = {
+          month,
+          revenue: Math.round(accrual.revenue),
+          expenses: Math.round(accrual.expenses),
+          profit: Math.round(accrual.revenue - accrual.expenses),
+          passengerCount: Math.round(weeklyPassengers * WEEKS_PER_MONTH),
+          loadFactor,
+          // No per-flight punctuality simulation exists yet — proxy with the airline's reputation.
+          onTimePerformance: Math.round(Math.min(99, Math.max(50, airline.reputation ?? 75))),
+        };
+
+        set({
+          airline: {
+            ...airline,
+            finances: {
+              ...airline.finances,
+              monthlyReports: [...(airline.finances.monthlyReports ?? []), report].slice(-24),
+              monthlyAccrual: { revenue: 0, expenses: 0 },
+            },
+          },
+        });
+
+        if (state.settings.notificationsEnabled) {
+          get().addNotification({
+            type: report.profit >= 0 ? 'success' : 'warning',
+            title: 'Monthly report generated',
+            message: `${month.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}: revenue ${formatCurrency(report.revenue, state.settings.currencyFormat)}, expenses ${formatCurrency(report.expenses, state.settings.currencyFormat)}, net ${report.profit >= 0 ? 'profit' : 'loss'} of ${formatCurrency(Math.abs(report.profit), state.settings.currencyFormat)}.`,
+          });
+        }
+
+        return report;
+      },
+
       // Reset
       resetGame: async () => {
         try {
@@ -1545,6 +1652,21 @@ export const useGameStore = create<GameStore>()(
     }),
     {
       name: 'airline-sim-storage',
+      // zustand persist round-trips the store through JSON, so every Date field
+      // comes back as an ISO string after a reload. Revive them to real Date
+      // objects here, otherwise screens that call Date methods on rehydrated
+      // state (e.g. StaffScreen's reduced-wage check calling
+      // currentDate.getTime()) crash before the first game tick can repair it.
+      merge: (persistedState, currentState) => {
+        const merged = { ...currentState, ...(persistedState as Partial<GameState> | undefined) };
+        // Old saves predate new settings keys (e.g. `units`): fill any missing
+        // fields with defaults so rehydrated settings are always complete.
+        if (merged.settings) {
+          merged.settings = { ...defaultSettings, ...merged.settings };
+        }
+        revivePersistedDates(merged);
+        return merged;
+      },
       // Old saves predate route timetables: regenerate any missing/stale ones after rehydration.
       onRehydrateStorage: () => (state) => {
         if (state?.airline?.routes?.length) {
@@ -1562,6 +1684,51 @@ export const useGameStore = create<GameStore>()(
     }
   )
 );
+
+// Date fields are typed as Date in the store but come back as ISO strings after
+// JSON rehydration (see the persist merge above). Revive every one of them.
+// String-typed dates (finance history, fuel price history) and numeric
+// timestamps (reducedWageUntil) are intentionally left untouched.
+export function revivePersistedDates(merged: Partial<GameState>): void {
+  if (typeof merged.currentDate === 'string') {
+    merged.currentDate = new Date(merged.currentDate);
+  }
+
+  const airline = merged.airline;
+  if (airline) {
+    if (typeof airline.founded === 'string') airline.founded = new Date(airline.founded);
+    for (const member of airline.staff ?? []) {
+      if (member && typeof member.startDate === 'string') member.startDate = new Date(member.startDate);
+    }
+    for (const aircraft of airline.fleet ?? []) {
+      if (typeof aircraft.lastMaintenance === 'string') aircraft.lastMaintenance = new Date(aircraft.lastMaintenance);
+      if (typeof aircraft.nextMaintenance === 'string') aircraft.nextMaintenance = new Date(aircraft.nextMaintenance);
+    }
+    const finances = airline.finances;
+    if (finances) {
+      for (const report of finances.monthlyReports ?? []) {
+        if (typeof report.month === 'string') report.month = new Date(report.month);
+      }
+      for (const loan of finances.loans ?? []) {
+        if (typeof loan.startDate === 'string') loan.startDate = new Date(loan.startDate);
+        if (typeof loan.endDate === 'string') loan.endDate = new Date(loan.endDate);
+      }
+      for (const investment of finances.investments ?? []) {
+        if (typeof investment.dateAcquired === 'string') investment.dateAcquired = new Date(investment.dateAcquired);
+      }
+    }
+  }
+
+  const world = merged.world;
+  if (world) {
+    for (const regulation of world.regulations ?? []) {
+      if (typeof regulation.effectiveDate === 'string') regulation.effectiveDate = new Date(regulation.effectiveDate);
+    }
+    for (const event of world.activeEvents ?? []) {
+      if (typeof event.date === 'string') event.date = new Date(event.date);
+    }
+  }
+}
 
 // Lazy timetable migration: older saves predate route timetables. Regenerates any
 // missing/stale timetables once, after the persisted state has been rehydrated.

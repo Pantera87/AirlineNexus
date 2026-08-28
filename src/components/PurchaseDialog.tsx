@@ -14,7 +14,7 @@ export default function PurchaseDialog({ listing }: PurchaseDialogProps) {
   const [loanTermMonths, setLoanTermMonths] = useState(60);
   const [quantity, setQuantity] = useState(1);
 
-  const { purchaseAircraft } = useFleetStore();
+  const { purchaseAircraft, closeDetailModal } = useFleetStore();
   const currencyFormat = useGameStore((state) => state.settings.currencyFormat);
 
   // Used listings are single airframes and can only be purchased one at a time.
@@ -50,6 +50,9 @@ export default function PurchaseDialog({ listing }: PurchaseDialogProps) {
     const result = await purchaseAircraft(listing.id, config);
     if (result.success) {
       alert(result.message);
+      // The listing is consumed (used) or purchased (new) — leave the detail
+      // modal so the player can continue browsing instead of being stuck.
+      closeDetailModal();
     } else {
       alert(`Error: ${result.message}`);
     }

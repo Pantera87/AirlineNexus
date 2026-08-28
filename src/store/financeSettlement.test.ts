@@ -1,14 +1,20 @@
 import { describe, it, expect, beforeAll } from 'vitest';
+import type { StaffMember } from '@/types/game';
+import { AIRCRAFT_DATABASE } from '@/data/aircraft';
 
 // Memory-backed localStorage stub (must exist before the store module is imported,
-// because zustand's persist middleware touches localStorage at module load).
+// because zustand persist touches window.localStorage at module load). vitest runs
+// in a node environment without `window`, so point it at globalThis to mirror a
+// browser; zustand's default storage is createJSONStorage(() => window.localStorage).
 const mem = new Map<string, string>();
-(globalThis as any).localStorage = {
+const localStorageStub = {
   getItem: (k: string) => (mem.has(k) ? mem.get(k)! : null),
   setItem: (k: string, v: string) => void mem.set(k, String(v)),
   removeItem: (k: string) => void mem.delete(k),
   clear: () => void mem.clear(),
 };
+(globalThis as any).localStorage = localStorageStub;
+(globalThis as any).window = globalThis;
 
 let useGameStore: typeof import('@/store/gameStore').useGameStore;
 
@@ -25,11 +31,47 @@ function ensureGame() {
   }
 }
 
+function makeCandidate(role: StaffMember['role']): Omit<StaffMember, 'id' | 'startDate'> {
+  return {
+    name: `Crew ${role}`,
+    gender: 'male',
+    photo: null,
+    role,
+    experience: 5,
+    salary: 20_000,
+    performance: 80,
+    assignedAircraft: null,
+    assignedRoute: null,
+    morale: 80,
+    flightHours: 0,
+    typeRating: null,
+    reducedWageUntil: null,
+  };
+}
+
+/** Hire one complete crew set for a usable aircraft type (crew dispatcher: under-crewed types earn nothing). */
+function hireCrewForType(typeId: string) {
+  const type = AIRCRAFT_DATABASE.find((t) => t.id === typeId)!;
+  const roles: StaffMember['role'][] = [
+    'captain',
+    'first-officer',
+    ...(type.category !== 'cargo'
+      ? (['purser', ...Array(Math.ceil(type.maxPassengers / 50)).fill('cabin-crew')] as StaffMember['role'][])
+      : []),
+  ];
+  for (const role of roles) {
+    expect(useGameStore.getState().hireStaff(makeCandidate(role)).success).toBe(true);
+  }
+}
+
 describe('real-time finance accrual (Phase 4b)', () => {
   it('stores a weekly plan when a route is created, without any lump-sum cash change', () => {
     ensureGame();
     if (useGameStore.getState().airline!.fleet.length === 0) {
       expect(useGameStore.getState().purchaseAircraft('embraer-175')).toBe(true);
+      // The crew dispatcher zeroes revenue/costs for under-crewed aircraft types —
+      // hire a full crew so the new route actually operates.
+      hireCrewForType('embraer-175');
     }
 
     const cashBefore = useGameStore.getState().airline!.finances.cash;

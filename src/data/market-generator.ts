@@ -86,6 +86,15 @@ function getRandomExpiryDays(): number {
 
 let activeUsedListings: AircraftListing[] = [];
 
+// Listing ids must be unique (React uses them as list keys). Date.now() has
+// only 1ms resolution and a refresh generates several listings in one loop,
+// so a per-session monotonic counter plus a random suffix guarantees that
+// two listings for the same aircraft type never share an id.
+let listingIdCounter = 0;
+function nextListingCounter(): string {
+  return `${listingIdCounter++}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export function generateUsedListing(aircraftType: AircraftType): AircraftListing {
   const yearBuilt = Math.max(
     aircraftType.firstDeliveryYear,
@@ -98,7 +107,11 @@ export function generateUsedListing(aircraftType: AircraftType): AircraftListing
   const price = calculateUsedPrice(aircraftType, yearBuilt, condition, flightHours);
 
   const listing: AircraftListing = {
-    id: `used-${aircraftType.id}-${Date.now()}`,
+    // Unique id: Date.now() alone is not unique — several listings for the
+    // same aircraft type are generated within the same millisecond, and the
+    // duplicate keys break React's reconciliation (stale cards stay in the
+    // DOM when switching between the new/used tabs).
+    id: `used-${aircraftType.id}-${Date.now()}-${nextListingCounter()}`,
     aircraftTypeId: aircraftType.id,
     isNew: false,
     price: price,

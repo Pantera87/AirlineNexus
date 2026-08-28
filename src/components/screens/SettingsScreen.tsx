@@ -1,5 +1,5 @@
 import { useGameStore } from '@store/gameStore';
-import { Settings, Bell, Volume2, Music, HelpCircle, DollarSign, Calendar, RotateCcw } from 'lucide-react';
+import { Settings, Bell, Volume2, Music, HelpCircle, DollarSign, Calendar, RotateCcw, Ruler } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 export function SettingsScreen() {
@@ -71,6 +71,14 @@ export function SettingsScreen() {
                 <option value="EUR">EUR - Euro</option>
                 <option value="GBP">GBP - British Pound</option>
               </select>
+            </div>
+            <div>
+              <label className="flex items-center gap-1.5 text-sm font-medium text-runway-300 mb-2"><Ruler className="w-4 h-4" />Units</label>
+              <select value={settings.units} onChange={(e) => updateSettings({ units: e.target.value as 'metric' | 'imperial' })} className="input-field">
+                <option value="imperial">Imperial (nautical miles, knots)</option>
+                <option value="metric">Metric (kilometers, km/h)</option>
+              </select>
+              <p className="text-xs text-runway-500 mt-1">Applies to distances and speeds. Temperature conversion coming later.</p>
             </div>
             <div>
               <label className="block text-sm font-medium text-runway-300 mb-2">Date Format</label>

@@ -14,84 +14,7 @@ import {
   getActiveListings as getActiveUsedListings
 } from '../data/market-generator';
 import { useGameStore } from './gameStore';
-
-// Map marketplace aircraftTypeId to game AIRCRAFT_DATABASE id
-function mapMarketplaceIdToGameId(marketplaceId: string): string | null {
-  const mapping: Record<string, string> = {
-    // Boeing Narrowbody
-    'boeing-737-max-8': 'b737-max8',
-    'boeing-737-max-9': 'b737-max8', // No exact match, use closest
-    'boeing-737-max-10': 'b737-max8',
-    'boeing-737-classic': 'b737-800',
-    'boeing-737-ng': 'b737-800',
-
-    // Airbus Narrowbody
-    'airbus-a220-100': 'embraer-175', // Regional equivalent
-    'airbus-a220-300': 'embraer-175',
-    'airbus-a319neo': 'a320neo',
-    'airbus-a320neo': 'a320neo',
-    'airbus-a321neo': 'a321neo',
-    'airbus-a321xlr': 'a321neo',
-    'airbus-a320ceo': 'a320neo',
-    'airbus-a318': 'a320neo',
-    'airbus-a319': 'a320neo',
-
-    // Boeing Widebody
-    'boeing-767-300er': 'b777-300er',
-    'boeing-767-f': 'b777-f',
-    'boeing-777-200er': 'b777-300er',
-    'boeing-777-300er': 'b777-300er',
-    'boeing-777-8': 'b777-300er',
-    'boeing-777-9': 'b777-300er',
-    'boeing-787-8': 'b787-9',
-    'boeing-787-9': 'b787-9',
-    'boeing-787-10': 'b787-9',
-    'boeing-747-400': 'b747-8',
-    'boeing-747-8f': 'b747-8',
-
-    // Airbus Widebody
-    'airbus-a330-200': 'a330-300',
-    'airbus-a330-300': 'a330-300',
-    'airbus-a330-800neo': 'a330-300',
-    'airbus-a330-900neo': 'a330-300',
-    'airbus-a350-900': 'a350-900',
-    'airbus-a350-1000': 'a350-900',
-    'airbus-a380-800': 'a380',
-    'airbus-a340-300': 'a330-300',
-    'airbus-a340-600': 'a330-300',
-
-    // Regional Jets
-    'embraer-e175-e2': 'embraer-175',
-    'embraer-e190-e2': 'embraer-175',
-    'embraer-e195-e2': 'embraer-175',
-    'embraer-e175': 'embraer-175',
-    'embraer-e190': 'embraer-175',
-    'embraer-e195': 'embraer-175',
-
-    // Turboprops
-    'atr-42-600': 'at7-600',
-    'atr-42-600s': 'at7-600',
-    'atr-72-600': 'at7-600',
-    'atr-72-600f': 'at7-600',
-
-    // Legacy / Other (map to closest equivalents)
-    'md-80': 'b737-800',
-    'md-90': 'b737-800',
-    'md-11f': 'b777-f',
-    'dc-9': 'crj-200',
-    'f-27': 'at7-600',
-    'f-28': 'crj-200',
-    'il-86': 'a330-300',
-    'il-96': 'b747-8',
-    'tu-204': 'a330-300',
-    'tu-204c': 'b777-f',
-    'tu-214': 'a330-300',
-    'tu-214c': 'b777-f',
-    'a300b4': 'a330-300',
-  };
-
-  return mapping[marketplaceId] || null;
-}
+import { gameIdForMarketplaceType } from '../data/aircraft';
 
 interface PurchaseConfig {
   type: PurchaseType;
@@ -141,6 +64,7 @@ interface FleetMarketplaceState {
   closeDetailModal: () => void;
 
   switchTab: (tab: 'new' | 'used') => void;
+  resetMarketplace: () => void;
 
   purchaseAircraft: (listingId: string, config: PurchaseConfig) => Promise<PurchaseResult>;
 
@@ -196,7 +120,15 @@ export const useFleetStore = create<FleetMarketplaceState>((set, get) => ({
   },
 
   switchTab: (tab) => {
-    set({ activeTab: tab });
+    // Switching tabs also dismisses any open detail modal so the grid is
+    // never blocked or left showing a listing from the other tab.
+    set({ activeTab: tab, selectedListingId: null });
+  },
+
+  resetMarketplace: () => {
+    // Called when the player enters the marketplace so it always starts
+    // on the "Buy New" tab with no stale selection from a previous visit.
+    set({ activeTab: 'new', selectedListingId: null });
   },
 
   purchaseAircraft: async (listingId, config): Promise<PurchaseResult> => {
@@ -259,9 +191,10 @@ export const useFleetStore = create<FleetMarketplaceState>((set, get) => ({
         };
       }
 
-      // Map marketplace aircraftTypeId to game AIRCRAFT_DATABASE id so FleetScreen can find it.
-      // Checked before loan creation for the same reason as the affordability check above.
-      const gameId = mapMarketplaceIdToGameId(listing.aircraftTypeId);
+      // Map marketplace aircraftTypeId to the exact AIRCRAFT_DATABASE entry for
+      // that airframe (the database covers every marketplace type, so no
+      // "closest match" substitution ever changes the aircraft identity).
+      const gameId = gameIdForMarketplaceType(listing.aircraftTypeId);
       if (!gameId) {
         return {
           success: false,

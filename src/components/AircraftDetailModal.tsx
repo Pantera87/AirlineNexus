@@ -4,9 +4,9 @@ import { useGameStore } from '../store/gameStore';
 import { formatCurrency } from '../utils/helpers';
 import { ConditionGrade } from '../types/game';
 import { AIRCRAFT_TYPES } from '../data/aircraft-types';
-import { AIRCRAFT_DATABASE } from '../data/aircraft';
-import AircraftImage from './AircraftImage';
 import PurchaseDialog from './PurchaseDialog';
+import { useUnits, formatDistanceKm, formatSpeedKmh } from '../utils/units';
+
 
 export default function AircraftDetailModal() {
   const {
@@ -16,6 +16,8 @@ export default function AircraftDetailModal() {
     usedAircraftListings
   } = useFleetStore();
   const currencyFormat = useGameStore((state) => state.settings.currencyFormat);
+  const units = useUnits();
+
 
   // Close modal on Escape key - moved immediately after store hook to maintain consistent hook order
   useEffect(() => {
@@ -42,16 +44,9 @@ export default function AircraftDetailModal() {
 
   if (!aircraftType) return null;
 
-  // Find matching imageKey from the database (bridges naming conventions)
-  const dbMatch = AIRCRAFT_DATABASE.find(
-    (db) =>
-      db.name.toLowerCase().replace(/[^a-z0-9]/g, '') ===
-      `${aircraftType.manufacturer} ${aircraftType.model}`.toLowerCase().replace(/[^a-z0-9]/g, '')
-  );
-
   return (
-    <div className="fixed inset-0 glass-modal-backdrop z-50 flex items-center justify-center p-4">
-      <div className="glass-modal max-w-4xl w-full max-h-[90vh] overflow-y-auto relative">
+    <div className="fixed inset-0 glass-modal-backdrop z-50 flex items-center justify-center p-4" onClick={closeDetailModal}>
+      <div className="glass-modal max-w-4xl w-full max-h-[90vh] overflow-y-auto relative" onClick={(e) => e.stopPropagation()}>
         {/* Close button */}
         <button
           onClick={closeDetailModal}
@@ -63,13 +58,8 @@ export default function AircraftDetailModal() {
         <div className="p-6">
           {/* Header */}
           <div className="flex flex-col lg:flex-row gap-6 mb-6">
-            {/* Aircraft image */}
-            <AircraftImage
-              keyOrId={dbMatch?.imageKey || aircraftType.id}
-              fallbackKeys={[aircraftType.id]}
-              alt={`${aircraftType.manufacturer} ${aircraftType.model}`}
-              className="w-full lg:w-1/2 h-64 overflow-hidden rounded-lg"
-            />
+            {/* Aircraft artwork (placeholder for real photo) */}
+            <div className="w-full lg:w-1/2 h-64 overflow-hidden rounded-lg bg-gradient-to-br from-sky-900/40 via-runway-800/60 to-blue-900/40" />
 
             {/* Basic info */}
             <div className="lg:w-1/2 space-y-4">
@@ -106,8 +96,8 @@ export default function AircraftDetailModal() {
             <h3 className="text-xl font-semibold text-white mb-4">Specifications</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
               <div className="space-y-2">
-                <SpecRow label="Range" value={`${formatNumber(aircraftType.rangeKm)} km`} />
-                <SpecRow label="Cruise Speed" value={`${formatNumber(aircraftType.cruiseSpeedKmh)} km/h`} />
+                <SpecRow label="Range" value={formatDistanceKm(aircraftType.rangeKm, units)} />
+                <SpecRow label="Cruise Speed" value={formatSpeedKmh(aircraftType.cruiseSpeedKmh, units)} />
                 <SpecRow label="Fuel Burn/Hour" value={`${formatNumber(aircraftType.fuelBurnPerHourKg)} kg`} />
               </div>
               <div className="space-y-2">

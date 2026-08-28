@@ -11,6 +11,7 @@ import {
   Bell,
   PlaneTakeoff,
   CalendarClock,
+  Handshake,
 } from 'lucide-react';
 import type { MenuItem } from '@/types/game';
 
@@ -36,7 +37,7 @@ const iconMap: Record<string, ReactNode> = {
   finances: <DollarSign className="w-5 h-5" />,
   staff: <Users className="w-5 h-5" />,
   operations: <PlaneTakeoff className="w-5 h-5" />,
-  alliances: <Globe className="w-5 h-5" />,
+  alliances: <Handshake className="w-5 h-5" />,
   world: <Globe className="w-5 h-5" />,
   settings: <Settings className="w-5 h-5" />,
   notifications: <Bell className="w-5 h-5" />,

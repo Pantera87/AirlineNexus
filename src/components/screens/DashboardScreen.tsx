@@ -6,7 +6,6 @@ import { motion } from 'framer-motion';
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart as RePieChart, Pie, Cell } from 'recharts';
 import { ChartPanel, ChartTooltip, compactMoney } from '@/components/charts/ChartPanel';
 import { StatusPill, toneFromStatus } from '@/components/icons/StatusIcons';
-import { SilhouetteForType } from '@/components/icons/AircraftSilhouettes';
 
 export function DashboardScreen() {
   const airline = useGameStore((state) => state.airline);
@@ -171,9 +170,8 @@ export function DashboardScreen() {
                 return (
                   <div key={aircraft.id} className="flex items-center justify-between p-3 rounded-lg bg-runway-800/50">
                     <div className="flex items-center gap-3">
-                      <div className="w-12 h-7 rounded-md bg-gradient-to-br from-sky-900/40 to-blue-900/40 flex items-center justify-center shrink-0">
-                        <SilhouetteForType typeId={aircraft.typeId} className="w-10 h-5" />
-                      </div>
+                      {/* Aircraft artwork (placeholder for real photo) */}
+                      <div className="w-12 h-7 rounded-md bg-gradient-to-br from-sky-900/40 to-blue-900/40 shrink-0" />
                       <div>
                         <p className="text-sm font-medium text-white">{type?.name || 'Unknown'}</p>
                         <p className="text-xs text-runway-400">{aircraft.registration}</p>

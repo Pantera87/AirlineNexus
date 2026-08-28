@@ -5,11 +5,10 @@ import { formatCurrency } from '@utils/helpers';
 import type { Aircraft, AircraftCategory } from '@/types/game';
 import { getRoutePath } from '@/utils/routeEngine';
 import { getPoolStats } from '@/utils/fleetDispatcher';
+import { useUnits, formatDistanceNm, formatSpeedKt } from '@/utils/units';
 import { Plane, Plus, X, DollarSign, Gauge, Users, Navigation, TrendingDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import AircraftImage from '../AircraftImage';
 import { StatusPill, MeterBar, toneFromStatus } from '@/components/icons/StatusIcons';
-import { AircraftArtwork, NarrowBodySilhouette } from '@/components/icons/AircraftSilhouettes';
 
 // Estimate resale value: ~5% depreciation per year + condition factor
 function estimateSalePrice(aircraft: Aircraft): number | null {
@@ -36,6 +35,8 @@ export function FleetScreen() {
   const sellAircraft = useGameStore((state) => state.sellAircraft);
   const navigateTo = useGameStore((state) => state.navigateTo);
   const currencyFormat = useGameStore((state) => state.settings.currencyFormat);
+  const units = useUnits();
+
   const [activeCategory, setActiveCategory] = useState<AircraftCategory | 'all'>('all');
   const [showMarketplace, setShowMarketplace] = useState(false);
   const [aircraftToSell, setAircraftToSell] = useState<Aircraft | null>(null);
@@ -181,9 +182,6 @@ export function FleetScreen() {
 
         {airline.fleet.length === 0 ? (
           <div className="glass-panel p-12 flex flex-col items-center justify-center text-center">
-            <div className="w-60 h-24 mb-4 rounded-xl bg-gradient-to-br from-sky-900/30 to-blue-900/30 border border-white/5 flex items-center justify-center">
-              <NarrowBodySilhouette className="w-48 h-20" />
-            </div>
             <h2 className="text-lg font-semibold text-white mb-2">Your fleet is empty</h2>
         <p className="text-sm text-runway-400 mb-4">Start building your airline by acquiring your first aircraft.</p>
         <div className="flex items-center gap-3">
@@ -209,11 +207,8 @@ export function FleetScreen() {
                 const type = AIRCRAFT_DATABASE.find((a) => a.id === aircraft.typeId);
                 return (
                   <div key={aircraft.id} className="glass-panel p-2 flex flex-col">
-                    {type?.imageKey ? (
-                      <AircraftImage keyOrId={type.imageKey} alt={type.name} category={type.category} className="w-full aspect-[16/8] rounded-lg" />
-                    ) : (
-                      <AircraftArtwork category={type?.category} className="w-full aspect-[16/8] rounded-lg" />
-                    )}
+                    {/* Aircraft artwork (placeholder for real photo) */}
+                    <div className="w-full aspect-[16/9] rounded-lg bg-gradient-to-br from-sky-900/40 via-runway-800/60 to-blue-900/40" />
                     <div className="mt-1.5 min-w-0">
                       <p className="text-sm font-semibold text-white truncate">{type?.name || 'Unknown'}</p>
                       <div className="flex items-center gap-2 mt-1">
@@ -401,11 +396,8 @@ export function FleetScreen() {
                   <div key={ac.id} className="p-4 rounded-lg bg-runway-800/50 hover:bg-runway-800 transition-colors">
                       <div className="flex items-center justify-between">
                       <div className="flex-1 flex items-center gap-3">
-                        {ac.imageKey ? (
-                          <AircraftImage keyOrId={ac.imageKey} alt={ac.name} category={ac.category} className="w-20 h-12 rounded-lg shrink-0" />
-                        ) : (
-                          <AircraftArtwork category={ac.category} className="w-20 h-12 rounded-lg shrink-0" artClassName="w-3/4 h-3/4" />
-                        )}
+                        {/* Aircraft artwork (placeholder for real photo) */}
+                        <div className="w-20 h-12 rounded-lg shrink-0 bg-gradient-to-br from-sky-900/40 via-runway-800/60 to-blue-900/40" />
                         <div className="flex items-center gap-2 mb-2">
                           <h3 className="text-sm font-semibold text-white">{ac.name}</h3>
                           <span className="badge badge-info">{ac.category}</span>
@@ -413,7 +405,7 @@ export function FleetScreen() {
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
                           <div className="flex items-center gap-1.5 text-runway-400">
                             <Navigation className="w-3.5 h-3.5" />
-                            {ac.range} nm
+                            {formatDistanceNm(ac.range, units)}
                           </div>
                           <div className="flex items-center gap-1.5 text-runway-400">
                             <Users className="w-3.5 h-3.5" />
@@ -421,7 +413,7 @@ export function FleetScreen() {
                           </div>
                           <div className="flex items-center gap-1.5 text-runway-400">
                             <Gauge className="w-3.5 h-3.5" />
-                            {ac.cruiseSpeed} kts
+                            {formatSpeedKt(ac.cruiseSpeed, units)}
                           </div>
                           <div className="flex items-center gap-1.5 text-runway-400">
                             <DollarSign className="w-3.5 h-3.5" />

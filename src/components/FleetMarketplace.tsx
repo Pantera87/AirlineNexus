@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import useFleetStore from '../store/fleetSlice';
 import { useGameStore } from '../store/gameStore';
 import FilterSidebar from './FilterSidebar';
@@ -8,11 +8,18 @@ import { ArrowLeft } from 'lucide-react';
 
 export default function FleetMarketplace() {
   const [isFiltersOpen, setIsFiltersOpen] = useState(true);
-  const { activeTab, switchTab } = useFleetStore();
+  const { activeTab, switchTab, resetMarketplace } = useFleetStore();
   const navigateTo = useGameStore((state) => state.navigateTo);
 
+  // The marketplace state (tab + selected listing) is global, so reset it on
+  // entry — otherwise returning from "Back to Fleet" lands the player on the
+  // previously selected tab (e.g. Used) instead of "Buy New".
+  useEffect(() => {
+    resetMarketplace();
+  }, [resetMarketplace]);
+
   return (
-    <div className="h-screen bg-linear-to-br from-slate-900 via-slate-800 to-slate-900 relative flex flex-col">
+    <div className="h-screen relative flex flex-col">
       {/* Background pattern - aircraft silhouette overlay */}
       <div className="absolute inset-0 opacity-5 pointer-events-none">
         <div className="w-full h-full bg-[radial-gradient(circle_at_center,rgba(148,163,255,0.1)_0%,transparent_70%)]" />

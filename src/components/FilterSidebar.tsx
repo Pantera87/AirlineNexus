@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import useFleetStore from '../store/fleetSlice';
 import { ConditionGrade } from '../types/game';
+import { useUnits } from '../utils/units';
+import { NM_TO_KM } from '../utils/routeEngine';
 
 interface FilterSidebarProps {
   isOpen: boolean;
@@ -13,6 +15,8 @@ export default function FilterSidebar({ setIsOpen }: FilterSidebarProps) {
     setFilters,
     clearAllFilters
   } = useFleetStore();
+  const units = useUnits();
+
 
   // Price range state
   const [priceMin, setPriceMin] = useState(0);
@@ -38,7 +42,7 @@ export default function FilterSidebar({ setIsOpen }: FilterSidebarProps) {
   };
 
   const updateRangeMin = () => {
-    setFilters({ rangeMin });
+    setFilters({ rangeMin: units === 'metric' ? rangeMin : Math.round(rangeMin * NM_TO_KM) });
   };
 
   const updateYearBuiltFrom = () => {
@@ -155,7 +159,7 @@ export default function FilterSidebar({ setIsOpen }: FilterSidebarProps) {
 
         {/* Minimum range */}
         <div>
-          <h3 className="text-sm font-medium text-white mb-2">Minimum Range (km)</h3>
+          <h3 className="text-sm font-medium text-white mb-2">Minimum Range ({units === 'metric' ? 'km' : 'nm'})</h3>
             <input
               type="number"
               value={rangeMin}
