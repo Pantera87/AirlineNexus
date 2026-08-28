@@ -31,7 +31,7 @@ export default function AircraftCard({ listing }: AircraftCardProps) {
       className={`aircraft-card-glass w-full p-4 text-left transition-all duration-300 ${isHovered ? 'scale-[1.02]' : ''}`}
     >
       {/* Aircraft artwork (placeholder for real photo) */}
-      <div className="mb-3 w-full aspect-[16/9] rounded-lg bg-gradient-to-br from-sky-900/40 via-runway-800/60 to-blue-900/40" />
+      <div className="mb-3 w-full aspect-video rounded-lg bg-linear-to-br from-sky-900/40 via-runway-800/60 to-blue-900/40" />
 
       {/* Manufacturer badge */}
       <div className="manufacturer-badge inline-block px-3 py-1 rounded-full text-xs font-medium mb-2">

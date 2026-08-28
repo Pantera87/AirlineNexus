@@ -59,7 +59,7 @@ export default function AircraftDetailModal() {
           {/* Header */}
           <div className="flex flex-col lg:flex-row gap-6 mb-6">
             {/* Aircraft artwork (placeholder for real photo) */}
-            <div className="w-full lg:w-1/2 h-64 overflow-hidden rounded-lg bg-gradient-to-br from-sky-900/40 via-runway-800/60 to-blue-900/40" />
+            <div className="w-full lg:w-1/2 h-64 overflow-hidden rounded-lg bg-linear-to-br from-sky-900/40 via-runway-800/60 to-blue-900/40" />
 
             {/* Basic info */}
             <div className="lg:w-1/2 space-y-4">
