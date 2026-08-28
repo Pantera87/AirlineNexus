@@ -171,7 +171,7 @@ export function DashboardScreen() {
                   <div key={aircraft.id} className="flex items-center justify-between p-3 rounded-lg bg-runway-800/50">
                     <div className="flex items-center gap-3">
                       {/* Aircraft artwork (placeholder for real photo) */}
-                      <div className="w-12 h-7 rounded-md bg-gradient-to-br from-sky-900/40 to-blue-900/40 shrink-0" />
+                      <div className="w-12 h-7 rounded-md bg-linear-to-br from-sky-900/40 to-blue-900/40 shrink-0" />
                       <div>
                         <p className="text-sm font-medium text-white">{type?.name || 'Unknown'}</p>
                         <p className="text-xs text-runway-400">{aircraft.registration}</p>

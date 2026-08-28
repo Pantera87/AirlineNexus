@@ -45,7 +45,7 @@ export function WelcomeScreen() {
   return (
     <div className="min-h-screen bg-cockpit-bg relative overflow-hidden">
       {/* Background gradient */}
-      <div className="absolute inset-0 bg-gradient-to-br from-sky-900/20 via-cockpit-bg to-blue-900/20" />
+      <div className="absolute inset-0 bg-linear-to-br from-sky-900/20 via-cockpit-bg to-blue-900/20" />
       
       {/* Animated background elements */}
       <div className="absolute inset-0 overflow-hidden">
@@ -72,7 +72,7 @@ export function WelcomeScreen() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.1 }}
             >
-              <span className="bg-gradient-to-r from-sky-400 via-blue-400 to-purple-400 bg-clip-text text-transparent">
+              <span className="bg-linear-to-r from-sky-400 via-blue-400 to-purple-400 bg-clip-text text-transparent">
                 Airline Nexus
               </span>
             </motion.h1>
@@ -102,7 +102,7 @@ export function WelcomeScreen() {
                     console.error('navigateTo function is not available');
                   }
                 }}
-                className="group flex items-center gap-3 px-8 py-4 bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white font-semibold rounded-xl shadow-lg shadow-sky-500/25 transition-all duration-300 hover:scale-105 hover:shadow-xl hover:shadow-sky-500/30"
+                className="group flex items-center gap-3 px-8 py-4 bg-linear-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white font-semibold rounded-xl shadow-lg shadow-sky-500/25 transition-all duration-300 hover:scale-105 hover:shadow-xl hover:shadow-sky-500/30"
               >
                 <Rocket className="w-5 h-5 group-hover:animate-bounce" />
                 Start Your Airline

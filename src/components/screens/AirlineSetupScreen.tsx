@@ -53,7 +53,7 @@ export function AirlineSetupScreen() {
         <div className="glass-panel p-8">
           {/* Header */}
           <div className="flex items-center gap-3 mb-8">
-            <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center">
+            <div className="w-12 h-12 rounded-lg bg-linear-to-br from-sky-500 to-blue-600 flex items-center justify-center">
               <PlaneTakeoff className="w-6 h-6 text-white" />
             </div>
             <div>
@@ -146,7 +146,7 @@ export function AirlineSetupScreen() {
             {/* Submit */}
             <button
               onClick={handleSubmit}
-              className="group w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white font-semibold rounded-xl shadow-lg shadow-sky-500/25 transition-all duration-300 hover:scale-[1.02]"
+              className="group w-full flex items-center justify-center gap-2 px-6 py-3 bg-linear-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white font-semibold rounded-xl shadow-lg shadow-sky-500/25 transition-all duration-300 hover:scale-[1.02]"
             >
               Launch Airline
               <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />

@@ -257,7 +257,7 @@ export function RoutesScreen() {
                 <div className="flex items-center gap-1.5 mb-4 flex-wrap">
                   {pathIatas.map((iata, i) => (
                     <span key={iata} className="flex items-center gap-1.5">
-                      {i > 0 && <span className="w-6 h-px bg-gradient-to-r from-sky-500/60 to-sky-400/60" />}
+                      {i > 0 && <span className="w-6 h-px bg-linear-to-r from-sky-500/60 to-sky-400/60" />}
                       <span
                         className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-bold border ${
                           i === 0
@@ -270,7 +270,7 @@ export function RoutesScreen() {
                       </span>
                     </span>
                   ))}
-                  <span className="w-6 h-px bg-gradient-to-r from-sky-500/60 to-sky-400/60" />
+                  <span className="w-6 h-px bg-linear-to-r from-sky-500/60 to-sky-400/60" />
                   <span
                     title={`Returns to hub ${route.origin}`}
                     className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-bold bg-sky-500/10 border border-sky-500/30 text-sky-300"

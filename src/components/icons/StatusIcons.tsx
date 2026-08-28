@@ -24,10 +24,10 @@ const PILL_TONES: Record<Tone, string> = {
 };
 
 const FILL_GRADIENTS: Record<Tone, string> = {
-  green: 'bg-gradient-to-r from-emerald-500 to-green-400',
-  amber: 'bg-gradient-to-r from-amber-500 to-amber-400',
-  red: 'bg-gradient-to-r from-red-500 to-red-400',
-  sky: 'bg-gradient-to-r from-sky-500 to-sky-400',
+  green: 'bg-linear-to-r from-emerald-500 to-green-400',
+  amber: 'bg-linear-to-r from-amber-500 to-amber-400',
+  red: 'bg-linear-to-r from-red-500 to-red-400',
+  sky: 'bg-linear-to-r from-sky-500 to-sky-400',
 };
 
 /** Glowing status dot. */
