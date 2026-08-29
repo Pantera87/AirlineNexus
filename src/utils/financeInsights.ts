@@ -89,7 +89,8 @@ export function computeExpenseBreakdown(airline: Airline, world: WorldState): Ex
     if (!origin || !dest) continue;
 
     const path = resolveRoutePathAirports(route);
-    const options = { weeksActive: route.weeksActive ?? 0, competitionShare, reputation };
+    // Match the weekly settlement: apply the airline's business model and the route's player-set price.
+    const options = { weeksActive: route.weeksActive ?? 0, competitionShare, reputation, model: airline.businessModel, fareMultiplier: route.fareMultiplier };
     const economics = path
       ? previewLoopEconomics(path, type, route.frequency, fuelPrice, options)
       : previewRouteEconomics(origin, dest, type, route.frequency, fuelPrice, options);
@@ -110,7 +111,7 @@ export function computeExpenseBreakdown(airline: Airline, world: WorldState): Ex
   }
 
   // --- Fleet fixed costs: every owned aircraft, whether it flies or not ---
-  const crewPlan = computeCrewPlan(airline.staff ?? [], airline.fleet ?? []);
+  const crewPlan = computeCrewPlan(airline.staff ?? [], airline.fleet ?? [], airline.routes ?? []);
   const engineerPenalty = 1 + Math.min(0.5, crewPlan.engineerShortfall * 0.1);
   for (const ac of airline.fleet ?? []) {
     const type = findAircraftById(ac.typeId);
@@ -356,7 +357,7 @@ export function computeFinanceTips(
   }
 
   // --- Crew coverage ---
-  const crewPlan = computeCrewPlan(airline.staff ?? [], airline.fleet ?? []);
+  const crewPlan = computeCrewPlan(airline.staff ?? [], airline.fleet ?? [], airline.routes ?? []);
   const shortTypes = Object.values(crewPlan.manningByType).filter(
     (m) => m.usableAircraft > 0 && m.coverageFactor < 1
   );

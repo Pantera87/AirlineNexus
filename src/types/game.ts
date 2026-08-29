@@ -189,6 +189,8 @@ export interface Route {
   flightTimeMin?: number; // estimated block time in minutes
   demandScore?: number; // 0-100 attractiveness score
   weeksActive?: number; // weeks the route has been operating (drives load-factor ramp-up)
+  /** Player-set ticket price as a multiple of the model's recommended (revenue-maximizing) price; 1.0 = recommended. Range 0.5–2. Absent = 1.0 (old saves). */
+  fareMultiplier?: number;
   /** Generated weekly timetable — hub-local departure/arrival times for every scheduled cycle (see utils/timetable). */
   timetable?: RouteSchedule;
 }
@@ -358,6 +360,15 @@ export interface StaffMember {
    * pilots + cabin crew, optional — old saves predate it). See crewRegulations.ts.
    */
   dutyHistory?: PilotDutyWeek[];
+  /**
+   * Decorative HR profile fields (age in years, short career bio, languages
+   * spoken). Generated once at hire and persisted; optional because saves
+   * written before they existed lack them (backfilled on load — see
+   * staffEngine.backfillMissingStaffProfiles).
+   */
+  age?: number;
+  bio?: string;
+  languages?: string[];
 }
 
 export type StaffRole =

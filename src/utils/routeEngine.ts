@@ -1,6 +1,7 @@
-import { Airport, AircraftType, AircraftCategory } from '@/types/game';
+import { Airport, AircraftType, AircraftCategory, BusinessModel } from '@/types/game';
 import { AIRCRAFT_DATABASE } from '@/data/aircraft';
 import { maxLoopsPerDay } from './crewRegulations';
+import { getBusinessModelConfig } from './businessModels';
 
 // ============================================================
 // Unit conversion
@@ -243,20 +244,46 @@ export function suggestDestinations(
 
 export interface RouteEconomicsPreview {
   estLoadFactor: number;
+  /** Average ticket price per passenger (onboard/in-flight revenue excluded). */
   ticketPrice: number;
   weeklyPassengers: number;
+  /** Total weekly revenue: ticket sales + in-flight ancillary sales. */
   weeklyRevenue: number;
+  /** Weekly revenue from in-flight purchases (part of weeklyRevenue, excluded from ticketPrice). */
+  weeklyOnboardRevenue: number;
   weeklyCosts: number;
   weeklyFuelCost: number;
   weeklyProfit: number;
 }
 
-/** Distance-based ticket price heuristic (realistic one-way average fares) */
-export function estimateTicketPrice(distanceNm: number): number {
+/**
+ * Distance-based ticket price heuristic (realistic one-way average fares).
+ * `model` scales the result by the business model's base fare (e.g. low-cost 0.65×,
+ * luxury 1.5×). Omitted → full-service baseline, so existing callers are unchanged.
+ */
+export function estimateTicketPrice(distanceNm: number, model?: BusinessModel): number {
   const base = 40; // fixed booking/airport surcharge component
   const perNm = distanceNm < 1500 ? 0.22 : 0.16; // long-haul fares grow more slowly per mile
   const longHaulPremium = distanceNm > 4000 ? 90 : 0; // intercontinental premium
-  return Math.round(base + distanceNm * perNm + longHaulPremium);
+  const distanceBase = Math.round(base + distanceNm * perNm + longHaulPremium);
+  return Math.max(1, Math.round(distanceBase * getBusinessModelConfig(model).fareMultiplier));
+}
+
+/**
+ * Load-factor adjustment from the ticket price relative to the RECOMMENDED (revenue-
+ * maximizing) price. The recommended price is the structural revenue maximum:
+ *   - price ratio ≤ 1 (discount): passengers are price-attracted, LF rises with a
+ *     slope of 0.5 — at 50% of recommended the LF is +25% (capped at ~97%).
+ *   - price ratio > 1 (premium): price-sensitive passengers drop off quadratically,
+ *     LF decays as ratio^-2 (floored at 5%).
+ * `baseLoadFactor` is the demand/competition/reputation estimate at the recommended price.
+ */
+export function priceLoadFactor(baseLoadFactor: number, priceRatio: number): number {
+  const r = Math.max(0.05, priceRatio); // guard against zero/negative ratios
+  if (r <= 1) {
+    return Math.min(0.97, baseLoadFactor * (1 + 0.5 * (1 - r)));
+  }
+  return Math.max(0.05, baseLoadFactor / (r * r));
 }
 
 /** Options that shape the load-factor model (all optional for backward compatibility) */
@@ -267,6 +294,10 @@ export interface RouteEconomicsOptions {
   competitionShare?: number;
   /** Airline reputation 0-100. Defaults to 50 (neutral). */
   reputation?: number;
+  /** Airline business model — shapes the recommended fare, load factor, in-flight revenue and hourly costs. Defaults to 'full-service'. */
+  model?: BusinessModel;
+  /** Player-set ticket price as a multiple of the model's recommended (revenue-maximizing) price. Defaults to 1.0 (recommended). */
+  fareMultiplier?: number;
 }
 
 /**
@@ -293,6 +324,9 @@ export const DEFAULT_FUEL_PRICE_PER_KG = 0.85;
  * dynamic fuel market; defaults to DEFAULT_FUEL_PRICE_PER_KG when omitted.
  * `options` shapes the load-factor model: new routes ramp up from ~45% of their
  * demand-based ceiling, competitors shave share off it, and reputation nudges ±10%.
+ * `options.model` applies the airline's business model (recommended fare, in-flight
+ * ancillary revenue, load-factor and hourly-cost modifiers), and `options.fareMultiplier`
+ * is the player-set price as a multiple of that model's recommended (revenue-maximizing) price.
  */
 export function previewRouteEconomics(
   origin: Airport,
@@ -304,6 +338,8 @@ export function previewRouteEconomics(
 ): RouteEconomicsPreview {
   const distanceNm = calculateRouteDistanceNm(origin, destination);
   const demand = scoreRouteDemand(origin, destination) / 100;
+  const model = getBusinessModelConfig(options.model);
+  const priceRatio = Math.max(0.05, options.fareMultiplier ?? 1);
 
   // --- Load factor model (realistic) ---
   const seatsPerFlight = aircraft.maxPassengers;
@@ -324,17 +360,27 @@ export function previewRouteEconomics(
   const reputation = options.reputation ?? 50;
   estLoadFactor *= 1 + ((reputation - 50) / 50) * 0.1;
 
+  // Business-model appeal (e.g. low-cost carriers fill seats more easily).
+  estLoadFactor *= model.loadFactorModifier;
   estLoadFactor = Math.min(0.95, Math.max(0.1, estLoadFactor));
 
-  const ticketPrice = estimateTicketPrice(distanceNm);
+  // Price elasticity: the model's recommended price is the revenue-maximizing one.
+  estLoadFactor = priceLoadFactor(estLoadFactor, priceRatio);
+
+  // Recommended price (model-scaled distance heuristic); the player's price is a multiple of it.
+  const recommendedPrice = estimateTicketPrice(distanceNm, options.model);
+  const ticketPrice = Math.max(1, Math.round(recommendedPrice * priceRatio));
+
   // Each scheduled unit is a round trip: two revenue-generating legs (outbound + return).
   const legsPerWeek = 2 * frequencyPerWeek;
   const weeklyPassengers = Math.round(seatsPerFlight * estLoadFactor * legsPerWeek);
-  const weeklyRevenue = weeklyPassengers * ticketPrice;
+  const weeklyOnboardRevenue = Math.round(weeklyPassengers * model.onboardRevenuePerPax);
+  const weeklyRevenue = weeklyPassengers * ticketPrice + weeklyOnboardRevenue;
   // Block time uses average speed (cruise minus taxi/climb/descent losses)
   const blockTimeHr = distanceNm / Math.max(aircraft.cruiseSpeed - 40, 120);
-  // Hourly cost: fuel at the live market price + crew/cabin/other costs that scale with cabin size.
-  const hourlyCrewAndOther = Math.max(400, aircraft.maxPassengers * 3);
+  // Hourly cost: fuel at the live market price + crew/cabin/other costs that scale with cabin size
+  // (scaled by the business model — full-service and luxury crews cost more per hour).
+  const hourlyCrewAndOther = Math.max(400, aircraft.maxPassengers * 3) * model.hourlyCostModifier;
   const weeklyFuelCost = Math.round(aircraft.fuelBurnPerHour * fuelPricePerKg * blockTimeHr * legsPerWeek);
   // Blended landing/handling fees at BOTH ends. Airport data stores per-landing list prices;
   // we charge a blended share covering landing, handling and terminal fees.
@@ -344,7 +390,7 @@ export function previewRouteEconomics(
   );
   const weeklyProfit = weeklyRevenue - weeklyCosts;
 
-  return { estLoadFactor, ticketPrice, weeklyPassengers, weeklyRevenue, weeklyCosts, weeklyFuelCost, weeklyProfit };
+  return { estLoadFactor, ticketPrice, weeklyPassengers, weeklyRevenue, weeklyOnboardRevenue, weeklyCosts, weeklyFuelCost, weeklyProfit };
 }
 
 // ============================================================
@@ -480,6 +526,8 @@ export function previewLoopEconomics(
 ): RouteEconomicsPreview {
   const hub = path[0];
   const legs = getLoopLegs(path);
+  const model = getBusinessModelConfig(options.model);
+  const priceRatio = Math.max(0.05, options.fareMultiplier ?? 1);
 
   // --- Load factor model (same ramp/competition/reputation as point-to-point) ---
   const seatsPerFlight = aircraft.maxPassengers;
@@ -489,7 +537,7 @@ export function previewLoopEconomics(
   const reputation = options.reputation ?? 50;
 
   let weeklyPassengers = 0;
-  let weeklyRevenue = 0;
+  let weeklyTicketRevenue = 0;
   let totalBlockTimeHr = 0;
   let lfWeightedSum = 0;
 
@@ -501,25 +549,32 @@ export function previewLoopEconomics(
     let estLf = ceilingLoadFactor * rampFactor;
     estLf *= 1 - competitionShare * 0.35;
     estLf *= 1 + ((reputation - 50) / 50) * 0.1;
+    estLf *= model.loadFactorModifier;
     estLf = Math.min(0.95, Math.max(0.1, estLf));
+    // Price elasticity is applied per leg at the player's price ratio (same ratio on every leg).
+    estLf = priceLoadFactor(estLf, priceRatio);
 
     const passengersPerWeek = seatsPerFlight * estLf * frequencyPerWeek; // one pass per cycle
     weeklyPassengers += passengersPerWeek;
-    weeklyRevenue += passengersPerWeek * estimateTicketPrice(distanceNm);
+    // Model-scaled recommended fare for THIS leg, priced at the player's ratio.
+    const legPrice = Math.max(1, Math.round(estimateTicketPrice(distanceNm, options.model) * priceRatio));
+    weeklyTicketRevenue += passengersPerWeek * legPrice;
     totalBlockTimeHr += distanceNm / Math.max(aircraft.cruiseSpeed - 40, 120);
     lfWeightedSum += estLf * passengersPerWeek;
   }
 
   const estLoadFactor = weeklyPassengers > 0 ? lfWeightedSum / weeklyPassengers : 0.35;
-  // Blended average fare across all legs (distance-weighted by passenger volume).
+  // Blended average TICKET fare across all legs (passenger-volume weighted, in-flight revenue excluded).
   const ticketPrice =
-    weeklyPassengers > 0 ? Math.round(weeklyRevenue / weeklyPassengers) : estimateTicketPrice(calculateLoopDistanceNm(path));
+    weeklyPassengers > 0 ? Math.round(weeklyTicketRevenue / weeklyPassengers) : estimateTicketPrice(calculateLoopDistanceNm(path), options.model);
 
   weeklyPassengers = Math.round(weeklyPassengers);
-  weeklyRevenue = Math.round(weeklyRevenue);
+  const weeklyOnboardRevenue = Math.round(weeklyPassengers * model.onboardRevenuePerPax);
+  const weeklyRevenue = Math.round(weeklyTicketRevenue) + weeklyOnboardRevenue;
 
-  // Hourly cost: fuel at the live market price + crew/cabin/other costs that scale with cabin size.
-  const hourlyCrewAndOther = Math.max(400, aircraft.maxPassengers * 3);
+  // Hourly cost: fuel at the live market price + crew/cabin/other costs that scale with cabin size
+  // (scaled by the business model — full-service and luxury crews cost more per hour).
+  const hourlyCrewAndOther = Math.max(400, aircraft.maxPassengers * 3) * model.hourlyCostModifier;
   const weeklyFuelCost = Math.round(aircraft.fuelBurnPerHour * fuelPricePerKg * totalBlockTimeHr * frequencyPerWeek);
   // Blended landing/handling fees at EVERY airport touched once per cycle (incl. the hub turnaround).
   const airportFees = path.reduce((sum, a) => sum + a.landingFee, 0) * frequencyPerWeek * 0.15;
@@ -528,7 +583,7 @@ export function previewLoopEconomics(
   );
   const weeklyProfit = weeklyRevenue - weeklyCosts;
 
-  return { estLoadFactor, ticketPrice, weeklyPassengers, weeklyRevenue, weeklyCosts, weeklyFuelCost, weeklyProfit };
+  return { estLoadFactor, ticketPrice, weeklyPassengers, weeklyRevenue, weeklyOnboardRevenue, weeklyCosts, weeklyFuelCost, weeklyProfit };
 }
 
 // ============================================================

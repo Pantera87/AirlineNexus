@@ -99,6 +99,7 @@ export function RoutesScreen() {
   const [stops, setStops] = useState<string[]>([]);
   const [aircraftTypeId, setAircraftTypeId] = useState('');
   const [frequency, setFrequency] = useState(7);
+  const [fareMultiplier, setFareMultiplier] = useState(1);
 
   if (!airline) return null;
 
@@ -120,6 +121,7 @@ export function RoutesScreen() {
       stops,
       aircraftType: aircraftTypeId || undefined,
       frequencyPerWeek: frequency,
+      fareMultiplier,
     });
 
     if (ok) {
@@ -131,6 +133,7 @@ export function RoutesScreen() {
       setShowCreateModal(false);
       setDestination('');
       setStops([]);
+      setFareMultiplier(1);
     } else {
       addNotification({
         type: 'error',
@@ -364,6 +367,8 @@ export function RoutesScreen() {
                 fleet={airline.fleet}
                 onAircraftTypeChange={setAircraftTypeId}
                 onFrequencyChange={setFrequency}
+                fareMultiplier={fareMultiplier}
+                onFareMultiplierChange={setFareMultiplier}
                 onCreate={handleCreateRoute}
               />
             </motion.div>
@@ -392,10 +397,11 @@ export function RoutesScreen() {
                 ownedTypeIds={ownedTypeIds}
                 currencyFormat={currencyFormat}
                 onClose={() => setSelectedRouteId(null)}
-                onSave={(frequency, aircraftTypeId) => {
+                onSave={(frequency, aircraftTypeId, fareMultiplier) => {
                   const ok = updateRoute(selectedRoute.id, {
                     frequency,
                     ...(aircraftTypeId ? { aircraftType: aircraftTypeId } : {}),
+                    fareMultiplier,
                   });
                   if (ok) {
                     addNotification({
@@ -450,6 +456,8 @@ interface RouteCreationFormProps {
   stops: string[];
   aircraftTypeId: string;
   frequency: number;
+  /** Player's ticket price, as a multiple (0.5–2.0) of the model's recommended (revenue-maximizing) price. */
+  fareMultiplier: number;
   ownedTypeIds: Set<string>;
   /** Full fleet — used for the live pool-availability check. */
   fleet: Aircraft[];
@@ -458,6 +466,7 @@ interface RouteCreationFormProps {
   onStopsChange: (stops: string[]) => void;
   onAircraftTypeChange: (id: string) => void;
   onFrequencyChange: (freq: number) => void;
+  onFareMultiplierChange: (multiplier: number) => void;
   onCreate: () => void;
 }
 
@@ -467,12 +476,14 @@ function RouteCreationForm({
   stops,
   aircraftTypeId,
   frequency,
+  fareMultiplier,
   ownedTypeIds,
   currencyFormat,
   onDestinationChange,
   onStopsChange,
   onAircraftTypeChange,
   onFrequencyChange,
+  onFareMultiplierChange,
   onCreate,
   fleet,
 }: RouteCreationFormProps) {
@@ -480,6 +491,7 @@ function RouteCreationForm({
   const [showStopPicker, setShowStopPicker] = useState(false);
   // Live market fuel price — route costs track the dynamic fuel market.
   const fuelPricePerKg = useGameStore((state) => state.world.fuelPrice);
+  const businessModel = useGameStore((state) => state.airline?.businessModel);
   const units = useUnits();
 
   const hubAirport = useMemo(() => (hubIata ? getAirportByIata(hubIata) : undefined), [hubIata]);
@@ -530,7 +542,10 @@ function RouteCreationForm({
   const demandScore = hubAirport && pathAirports ? scoreLoopDemand(hubAirport, pathAirports) : null;
   const economics =
     pathAirports && aircraftType
-      ? previewLoopEconomics(pathAirports, aircraftType, frequency, fuelPricePerKg)
+      ? previewLoopEconomics(pathAirports, aircraftType, frequency, fuelPricePerKg, {
+          model: businessModel,
+          fareMultiplier,
+        })
       : null;
 
   // Airports already used in the chain (hub + destination + stops) can't be picked again.
@@ -703,6 +718,27 @@ function RouteCreationForm({
           </select>
         </div>
 
+        {/* Ticket pricing: 50%–200% of the business model's recommended (revenue-maximizing) fare */}
+        <div>
+          <label className="text-xs font-medium text-runway-300 mb-1.5 block">
+            Ticket Pricing · <span className="text-sky-400">{Math.round(fareMultiplier * 100)}%</span> of recommended
+          </label>
+          <input
+            type="range"
+            min={50}
+            max={200}
+            step={5}
+            value={Math.round(fareMultiplier * 100)}
+            onChange={(e) => onFareMultiplierChange(Number(e.target.value) / 100)}
+            className="w-full accent-sky-500"
+          />
+          <div className="flex justify-between text-[10px] text-runway-500 mt-1">
+            <span>50% — discount (fills seats, lower fare)</span>
+            <span>100% — recommended (max revenue)</span>
+            <span>200% — premium (fewer passengers)</span>
+          </div>
+        </div>
+
         {economics && (
           <div className="rounded-lg bg-white/[0.03] border border-white/5 p-3">
             <p className="text-xs font-medium text-runway-300 mb-2">Route Economics Preview</p>
@@ -713,6 +749,10 @@ function RouteCreationForm({
               <span className="font-medium text-white">{formatPercentage(economics.estLoadFactor)}</span>
               <span className="text-runway-400">Ticket price</span>
               <span className="font-medium text-white">{formatCurrency(economics.ticketPrice, currencyFormat)}</span>
+              <span className="text-runway-400">Onboard revenue</span>
+              <span className="font-medium text-white" title="In-flight ancillary revenue (shop, meals, upgrades) per week">
+                {formatCurrency(economics.weeklyOnboardRevenue ?? 0, currencyFormat)}
+              </span>
               <span className="text-runway-400">Weekly fuel cost</span>
               <span className="font-medium text-amber-400" title={`At the current market price of $${fuelPricePerKg.toFixed(2)}/kg`}>
                 {formatCurrency(economics.weeklyFuelCost, currencyFormat)}
@@ -777,17 +817,19 @@ interface RouteDetailModalProps {
   ownedTypeIds: Set<string>;
   currencyFormat: 'USD' | 'EUR' | 'GBP';
   onClose: () => void;
-  onSave: (frequency: number, aircraftTypeId: string) => void;
+  onSave: (frequency: number, aircraftTypeId: string, fareMultiplier: number) => void;
   onToggleActive: () => void;
   onCancel: () => void;
 }
 
 function RouteDetailModal({ route, ownedTypeIds, currencyFormat, onClose, onSave, onToggleActive, onCancel }: RouteDetailModalProps) {
   const fuelPricePerKg = useGameStore((state) => state.world.fuelPrice);
+  const businessModel = useGameStore((state) => state.airline?.businessModel);
   const units = useUnits();
   const fleet = useGameStore((state) => state.airline?.fleet);
   const [frequency, setFrequency] = useState(route.frequency);
   const [aircraftTypeId, setAircraftTypeId] = useState(route.aircraftId || '');
+  const [fareMultiplier, setFareMultiplier] = useState(route.fareMultiplier ?? 1);
   const [confirmCancel, setConfirmCancel] = useState(false);
 
   const pathIatas = getRoutePath(route);
@@ -816,10 +858,15 @@ function RouteDetailModal({ route, ownedTypeIds, currencyFormat, onClose, onSave
     effectivePath && aircraftType
       ? previewLoopEconomics(effectivePath, aircraftType, frequency, fuelPricePerKg, {
           weeksActive: route.weeksActive ?? 0,
+          model: businessModel,
+          fareMultiplier,
         })
       : null;
 
-  const hasChanges = frequency !== route.frequency || aircraftTypeId !== (route.aircraftId || '');
+  const hasChanges =
+    frequency !== route.frequency ||
+    aircraftTypeId !== (route.aircraftId || '') ||
+    fareMultiplier !== (route.fareMultiplier ?? 1);
 
   return (
     <div>
@@ -892,6 +939,26 @@ function RouteDetailModal({ route, ownedTypeIds, currencyFormat, onClose, onSave
                   </option>
                 ))}
               </select>
+            </div>
+            {/* Ticket pricing: 50%–200% of the business model's recommended (revenue-maximizing) fare */}
+            <div>
+              <label className="text-xs font-medium text-runway-300 mb-1.5 block">
+                Ticket Pricing · <span className="text-sky-400">{Math.round(fareMultiplier * 100)}%</span> of recommended
+              </label>
+              <input
+                type="range"
+                min={50}
+                max={200}
+                step={5}
+                value={Math.round(fareMultiplier * 100)}
+                onChange={(e) => setFareMultiplier(Number(e.target.value) / 100)}
+                className="w-full accent-sky-500"
+              />
+              <div className="flex justify-between text-[10px] text-runway-500 mt-1">
+                <span>50% — discount (fills seats, lower fare)</span>
+                <span>100% — recommended (max revenue)</span>
+                <span>200% — premium (fewer passengers)</span>
+              </div>
             </div>
           </div>
 
@@ -984,6 +1051,10 @@ function RouteDetailModal({ route, ownedTypeIds, currencyFormat, onClose, onSave
                 <span className="font-medium text-white">{formatPercentage(economics.estLoadFactor)}</span>
                 <span className="text-runway-400">Ticket price</span>
                 <span className="font-medium text-white">{formatCurrency(economics.ticketPrice, currencyFormat)}</span>
+                <span className="text-runway-400">Onboard revenue</span>
+                <span className="font-medium text-white" title="In-flight ancillary revenue (shop, meals, upgrades) per week">
+                  {formatCurrency(economics.weeklyOnboardRevenue ?? 0, currencyFormat)}
+                </span>
                 <span className="text-runway-400">Weekly passengers</span>
                 <span className="font-medium text-white">{economics.weeklyPassengers.toLocaleString()}</span>
                 <span className="text-runway-400">Weekly fuel cost</span>
@@ -1043,7 +1114,7 @@ function RouteDetailModal({ route, ownedTypeIds, currencyFormat, onClose, onSave
               </>
             )}
           </button>
-          <button onClick={() => onSave(frequency, aircraftTypeId)} disabled={!hasChanges} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
+          <button onClick={() => onSave(frequency, aircraftTypeId, fareMultiplier)} disabled={!hasChanges} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
             Save Changes
           </button>
         </div>

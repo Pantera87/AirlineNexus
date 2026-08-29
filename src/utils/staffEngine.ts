@@ -114,6 +114,105 @@ export function staffPhotoPath(gender: 'male' | 'female', index: number): string
   return `/staff-photos/${gender}/${String(index).padStart(2, '0')}.png`;
 }
 
+// --- Profile flavor (age, languages, bio) ------------------------------------
+// Decorative HR data shown on the staff detail modal: generated once at hire
+// (and backfilled on load for old saves), then persisted on the member.
+
+/** Language pool for generated staff profiles; English is always spoken. */
+const LANGUAGE_POOL = [
+  'Spanish', 'Mandarin', 'Hindi', 'Arabic', 'French', 'German', 'Japanese',
+  'Russian', 'Portuguese', 'Korean', 'Turkish', 'Italian', 'Dutch', 'Greek',
+  'Polish', 'Swedish', 'Ukrainian', 'Vietnamese', 'Tagalog',
+];
+
+/** Languages spoken by a generated member: English plus 1–3 distinct pool languages. */
+export function generateLanguages(): string[] {
+  const pool = [...LANGUAGE_POOL];
+  const others: string[] = [];
+  for (let i = 0, n = randomBetween(1, 3); i < n; i++) {
+    others.push(pool.splice(randomBetween(0, pool.length - 1), 1)[0]);
+  }
+  return ['English', ...others];
+}
+
+/**
+ * Plausible age for a generated member: pilots age with their career hours,
+ * other roles with their years of experience, plus a small random spread.
+ */
+export function generateAge(role: StaffRole, experienceYears: number): number {
+  const base = isPilotRole(role) ? 24 + experienceYears : 20 + experienceYears;
+  return clamp(base + randomBetween(0, 7), 20, 67);
+}
+
+/** Bio templates per role — `{exp}` and `{hours}` are substituted. */
+const BIO_TEMPLATES: Record<StaffRole, string[]> = {
+  captain: [
+    'Took the left seat after {exp} years in the industry; {hours} hours logged across short-haul and long-haul networks, and briefs the crew with the calm of someone who has seen every weather pattern twice.',
+    '{hours} hours in the air and counting. A former first officer who earned command through quiet consistency rather than loudness — passengers rarely notice a flight, which is exactly the point.',
+    'Started as a trainee {exp} years ago and has since commanded everything from regional hops to transoceanic sectors. Known for steady landings and an even steadier hand in turbulence.',
+  ],
+  'first-officer': [
+    '{exp} years as a first officer with {hours} flying hours, mostly on regional routes before joining the fleet. Sharp, punctual, and quietly eager to log the hours toward the command seat.',
+    'Came up through the academy program {exp} years ago. The kind of first officer who double-checks the fuel figures twice — and has the {hours} hours to back up the habit.',
+    'A {exp}-year first officer who prefers the right seat for now. Logged {hours} hours across a dozen airports and still treats every departure like a first one.',
+  ],
+  purser: [
+    '{exp} years in the cabin, several of them on international routes. Runs the front of the cabin like clockwork service — the crew knows the standard before they even reach the galley.',
+    'Former flight attendant on a European carrier who stepped up to lead the cabin crew. {exp} years of experience in turning a 40-minute delay into a 40-minute shrug.',
+  ],
+  'cabin-crew': [
+    '{exp} years of cabin service, trained to airline-standard safety and long-haul procedure. The sort of calm you only notice when the cabin stops being noisy.',
+    'Newer to the skies with {exp} years of experience, but certified in safety equipment and long-haul operations — and the passengers remember the smile.',
+  ],
+  engineer: [
+    '{exp} years on the line, from A-checks to heavy maintenance. Speaks fluent engine diagnostics and has talked more than one airframe back to the fleet.',
+    'A line-maintenance veteran with {exp} years of experience keeping airframes airworthy on thin margins. If the aircraft is rolling on time, it is probably their doing.',
+  ],
+};
+
+/** One- or two-sentence career bio for a generated member. */
+export function generateBio(role: StaffRole, experienceYears: number, flightHours: number): string {
+  const template = randomChoice(BIO_TEMPLATES[role]);
+  return template
+    .replace(/\{exp\}/g, String(experienceYears))
+    .replace(/\{hours\}/g, formatNumber(flightHours));
+}
+
+/** Full decorative profile (age + bio + languages) for one role/experience combo. */
+export function generateStaffProfile(
+  role: StaffRole,
+  experienceYears: number,
+  flightHours: number
+): { age: number; bio: string; languages: string[] } {
+  return {
+    age: generateAge(role, experienceYears),
+    bio: generateBio(role, experienceYears, flightHours),
+    languages: generateLanguages(),
+  };
+}
+
+/**
+ * Fill in any missing profile fields (age, bio, languages) on existing members —
+ * the lazy migration for saves written before the profile fields existed.
+ * Pure — returns updated members and whether anything changed. Idempotent:
+ * already-populated profiles pass through untouched (same object).
+ */
+export function backfillMissingStaffProfiles(staff: StaffMember[]): { staff: StaffMember[]; changed: boolean } {
+  let changed = false;
+  const out = staff.map((m) => {
+    if (m.age != null && m.bio != null && (m.languages?.length ?? 0) > 0) return m;
+    changed = true;
+    const profile = generateStaffProfile(m.role, m.experience, m.flightHours);
+    return {
+      ...m,
+      age: m.age ?? profile.age,
+      bio: m.bio ?? profile.bio,
+      languages: (m.languages && m.languages.length > 0 ? m.languages : profile.languages),
+    };
+  });
+  return { staff: out, changed };
+}
+
 /** Flying-hours ranges for generated pilot candidates (they carry a whole career on them). */
 const PILOT_HOURS_RANGE: Record<'captain' | 'first-officer', [number, number]> = {
   captain: [5000, 25000], // captains are senior; 3k+ hours for promotion is common ground
@@ -163,6 +262,8 @@ export function generateHiringCandidate(
     salary = nonPilotMarketSalary(role, experience);
   }
 
+  const profile = generateStaffProfile(role, experience, flightHours);
+
   return {
     id: generateId('staff'),
     name,
@@ -179,6 +280,7 @@ export function generateHiringCandidate(
     flightHours,
     typeRating,
     reducedWageUntil,
+    ...profile,
   };
 }
 

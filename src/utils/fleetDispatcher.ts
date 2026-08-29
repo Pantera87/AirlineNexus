@@ -20,7 +20,7 @@
 // scales revenue by shared-pool time utilization — so a single aircraft can
 // legitimately cover parts of several same-type routes per day.
 
-import type { Aircraft, Airport, AircraftType, Route } from '@/types/game';
+import type { Aircraft, Airport, AircraftType, BusinessModel, Route } from '@/types/game';
 import { AIRPORT_DATABASE } from '@/data/airports';
 import {
   calculateRouteDistanceNm,
@@ -57,6 +57,8 @@ export interface DispatchInput {
   /** Resolves a route's closed loop path (HUB → stops… → DEST) or null if unknown. */
   resolvePath: (route: Route) => Airport[] | null;
   fuelPricePerKg?: number;
+  /** The airline's business model — shapes the economics used to rank routes. */
+  businessModel?: BusinessModel;
   /** Cash available to cover one-time positioning costs during this dispatch. */
   cash: number;
 }
@@ -186,7 +188,13 @@ export function computeDispatchPlan(input: DispatchInput): DispatchPlan {
         required: getRequiredAircraftCount(path, type, route.frequency),
         staffed: fleet.filter((a) => a.assignedRoute === route.id && a.typeId === type.id).length,
         // Out-of-range routes rank last (and need 0 aircraft) — they simply cannot operate.
-        rank: path ? previewLoopEconomics(path, type, route.frequency, fuelPrice).weeklyProfit : 0,
+        // Rank uses each route's player-set price and the airline's business model.
+        rank: path
+          ? previewLoopEconomics(path, type, route.frequency, fuelPrice, {
+              model: input.businessModel,
+              fareMultiplier: route.fareMultiplier,
+            }).weeklyProfit
+          : 0,
       },
     ]);
   }

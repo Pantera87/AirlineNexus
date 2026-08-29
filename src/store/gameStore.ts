@@ -48,6 +48,7 @@ import {
   settleMonthlyPayroll,
   accrueWeeklyFlyingHours,
   getPromotionEligibility,
+  backfillMissingStaffProfiles,
 } from '@/utils/staffEngine';
 import { generateTimetable, needsTimetableRegeneration } from '@/utils/timetable';
 import { GameTimeRepository } from '@/database/repositories/gameTime.repository';
@@ -200,8 +201,12 @@ interface GameStore extends GameState {
     stops?: string[]; // intermediate airports in flight order (multi-hop loop)
     aircraftType?: string;
     frequencyPerWeek?: number;
+    fareMultiplier?: number; // player-set fare as a multiple of the model's recommended price (clamped 0.5–2.0)
   }) => boolean;
-  updateRoute: (routeId: string, updates: { frequency?: number; aircraftType?: string; isActive?: boolean }) => boolean;
+  updateRoute: (
+    routeId: string,
+    updates: { frequency?: number; aircraftType?: string; isActive?: boolean; fareMultiplier?: number }
+  ) => boolean;
   cancelRoute: (routeId: string) => boolean;
 
   // Hub policy enforcement — cancels legacy routes that don't originate at the hub.
@@ -582,6 +587,7 @@ export const useGameStore = create<GameStore>()(
           fleet: airline.fleet,
           resolvePath: (r) => resolveRoutePathAirports(r),
           fuelPricePerKg: state.world.fuelPrice,
+          businessModel: airline.businessModel,
           cash: airline.finances.cash,
         });
 
@@ -825,7 +831,7 @@ export const useGameStore = create<GameStore>()(
         if (!airline) return null;
 
         const staff = airline.staff ?? [];
-        const plan = computeCrewPlan(staff, airline.fleet ?? []);
+        const plan = computeCrewPlan(staff, airline.fleet ?? [], airline.routes ?? []);
         if (!plan.changed) return { staffed: 0, released: 0 };
 
         const nextStaff = staff.map((m) => {
@@ -1045,7 +1051,7 @@ export const useGameStore = create<GameStore>()(
       },
 
       // Route management
-      createRoute: ({ origin, destination, stops = [], aircraftType, frequencyPerWeek }) => {
+      createRoute: ({ origin, destination, stops = [], aircraftType, frequencyPerWeek, fareMultiplier }) => {
         const state = get();
         const airline = state.airline;
         if (!airline) return false;
@@ -1091,6 +1097,13 @@ export const useGameStore = create<GameStore>()(
           frequency = Math.min(frequency, maxLoopFrequencyPerWeek(pathAirports as Airport[], assignedType));
         }
 
+        // Per-route ticket price: the player prices fares as a multiple of the airline's
+        // business-model recommended (revenue-maximizing) price — clamped to 50%–200%.
+        const fareMult =
+          fareMultiplier !== undefined
+            ? Math.min(2, Math.max(0.5, Number.isFinite(fareMultiplier) ? fareMultiplier : 1))
+            : 1;
+
         // Weekly timetable: hub-local departure/arrival times for every scheduled cycle.
         // Flight numbers use this route's 1-based position in the routes array.
         const routeId = generateId('route');
@@ -1122,6 +1135,7 @@ export const useGameStore = create<GameStore>()(
           distanceNm,
           flightTimeMin,
           demandScore,
+          fareMultiplier: fareMult,
           timetable,
         };
 
@@ -1138,7 +1152,7 @@ export const useGameStore = create<GameStore>()(
         return true;
       },
 
-      updateRoute: (routeId, { frequency, aircraftType, isActive }) => {
+      updateRoute: (routeId, { frequency, aircraftType, isActive, fareMultiplier }) => {
         const state = get();
         const airline = state.airline;
         if (!airline) return false;
@@ -1187,6 +1201,12 @@ export const useGameStore = create<GameStore>()(
 
         if (isActive !== undefined) {
           next.isActive = isActive;
+        }
+
+        // Per-route ticket price: clamped to 50%–200% of the model's recommended price.
+        if (fareMultiplier !== undefined) {
+          const m = Number.isFinite(fareMultiplier) ? fareMultiplier : 1;
+          next.fareMultiplier = Math.min(2, Math.max(0.5, m));
         }
 
         // Regenerate the weekly timetable when frequency/aircraft changed (or it's missing).
@@ -1325,8 +1345,9 @@ export const useGameStore = create<GameStore>()(
         // screen's workload-sized crew requirements (utils/crewDispatcher).
         const neededHoursByType = typeWeeklyCycleHours(airline.routes);
         // Crew manning: under-crewed types can't fly — their operations scale down by the
-        // coverage factor (rated-vs-requirement, or a flat 0.5 for unrated coverage).
-        const crewPlan = computeCrewPlan(airline.staff ?? [], airline.fleet ?? []);
+        // coverage factor: pilot-pair coverage (pilots are type-specific) × the fleet-wide
+        // purser/cabin-crew pool coverage (cabin crew can fly any type).
+        const crewPlan = computeCrewPlan(airline.staff ?? [], airline.fleet ?? [], airline.routes ?? []);
         const utilizationFactor = (typeId: string): number => {
           const needed = neededHoursByType.get(typeId) ?? 0;
           if (needed <= 0) return 1;
@@ -1359,11 +1380,15 @@ export const useGameStore = create<GameStore>()(
                 weeksActive: weeksSoFar, // ramp-up based on how long the route has been operating so far
                 competitionShare,
                 reputation: airline.reputation ?? 50,
+                model: airline.businessModel,
+                fareMultiplier: route.fareMultiplier,
               })
             : previewRouteEconomics(originAirport, destAirport, aircraftType, route.frequency, fuelPricePerKg, {
                 weeksActive: weeksSoFar, // ramp-up based on how long the route has been operating so far
                 competitionShare,
                 reputation: airline.reputation ?? 50,
+                model: airline.businessModel,
+                fareMultiplier: route.fareMultiplier,
               });
 
           // If this type's fleet is over-committed across routes, scale operations down.
@@ -1669,6 +1694,12 @@ export const useGameStore = create<GameStore>()(
         }
         if (state?.airline?.staff?.length) {
           setTimeout(seedMissingDutyHistory, 0);
+          // After the duty seed: backfill decorative profile fields (age, bio,
+          // languages) on saves written before they existed.
+          setTimeout(backfillStaffProfiles, 0);
+          // After the duty seed: reconcile crew assignments written by older
+          // dispatcher versions (see reconcileCrewAssignments below).
+          setTimeout(reconcileCrewAssignments, 0);
         }
       },
       // Don't persist certain volatile state
@@ -1770,4 +1801,25 @@ function seedMissingDutyHistory(): void {
   const weekStartIso = weekStartIsoOf(state.currentDate);
   const staff = airline.staff.map((m) => (missing.includes(m) ? appendDutyWeek(m, 0, weekStartIso) : m));
   useGameStore.setState({ airline: { ...airline, staff } });
+}
+
+// Lazy staff-profile migration: saves written before the decorative profile
+// fields (age, bio, languages) lack them. Generates them once for every member
+// missing any of the fields; the result persists, so this runs exactly once
+// per old save (no-op afterwards).
+function backfillStaffProfiles(): void {
+  const state = useGameStore.getState();
+  const airline = state.airline;
+  if (!airline?.staff?.length) return;
+  const { staff, changed } = backfillMissingStaffProfiles(airline.staff);
+  if (changed) useGameStore.setState({ airline: { ...airline, staff } });
+}
+
+// Lazy crew-dispatch migration: saves written before the workload-based rotation caps can
+// still carry the old dispatcher's releases — cabin crew sitting unassigned while the
+// staffing report requires them. The dispatcher is otherwise only triggered by HR actions
+// (hire/fire/promote/convert), so re-run it once after rehydration to reconcile existing
+// rosters immediately. Idempotent: a no-op when the current assignments already match.
+export function reconcileCrewAssignments(): void {
+  useGameStore.getState().dispatchCrew();
 }

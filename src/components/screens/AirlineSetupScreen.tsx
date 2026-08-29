@@ -2,16 +2,16 @@ import { useState } from 'react';
 import { useGameStore } from '@store/gameStore';
 import { AIRPORT_DATABASE } from '@data/airports';
 import type { BusinessModel } from '@/types/game';
+import { BUSINESS_MODEL_CONFIGS } from '@/utils/businessModels';
 import { PlaneTakeoff, ChevronRight, Check } from 'lucide-react';
 import { motion } from 'framer-motion';
 
-const businessModels: { id: BusinessModel; label: string; description: string }[] = [
-  { id: 'low-cost', label: 'Low-Cost Carrier', description: 'Affordable fares, high volume, no frills.' },
-  { id: 'full-service', label: 'Full-Service Carrier', description: 'Premium service with included amenities.' },
-  { id: 'luxury', label: 'Luxury Airline', description: 'Top-tier luxury and exclusive service.' },
-  { id: 'cargo', label: 'Cargo Airline', description: 'Focus on freight and logistics.' },
-  { id: 'hybrid', label: 'Hybrid Model', description: 'A mix of low-cost and full-service.' },
-];
+const businessModels = Object.values(BUSINESS_MODEL_CONFIGS).map((cfg) => ({
+  id: cfg.id,
+  label: cfg.label,
+  description: cfg.description,
+  comingSoon: cfg.comingSoon,
+}));
 
 export function AirlineSetupScreen() {
   const startGame = useGameStore((state) => state.startGame);
@@ -126,15 +126,25 @@ export function AirlineSetupScreen() {
                 {businessModels.map((model) => (
                   <button
                     key={model.id}
-                    onClick={() => setBusinessModel(model.id)}
+                    onClick={() => !model.comingSoon && setBusinessModel(model.id)}
+                    disabled={model.comingSoon}
                     className={`flex items-center justify-between p-3 rounded-lg border transition-all duration-200 ${
                       businessModel === model.id
                         ? 'border-sky-500 bg-sky-500/10'
-                        : 'border-runway-700 hover:border-runway-600'
+                        : model.comingSoon
+                          ? 'border-runway-700 opacity-60 cursor-not-allowed'
+                          : 'border-runway-700 hover:border-runway-600'
                     }`}
                   >
                     <div className="text-left">
-                      <p className="text-sm font-medium text-white">{model.label}</p>
+                      <p className="text-sm font-medium text-white flex items-center gap-2">
+                        {model.label}
+                        {model.comingSoon && (
+                          <span className="px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 text-[10px] font-semibold uppercase tracking-wide">
+                            Coming soon
+                          </span>
+                        )}
+                      </p>
                       <p className="text-xs text-runway-400">{model.description}</p>
                     </div>
                     {businessModel === model.id && <Check className="w-5 h-5 text-sky-400" />}
