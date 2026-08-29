@@ -239,7 +239,7 @@ export function RoutesScreen() {
                         e.stopPropagation();
                         navigateTo('timetable');
                       }}
-                      className="p-1.5 rounded-lg bg-white/[0.03] border border-white/10 text-runway-400 hover:text-sky-300 hover:border-white/25 transition-colors"
+                      className="p-1.5 rounded-lg bg-white/3 border border-white/10 text-runway-400 hover:text-sky-300 hover:border-white/25 transition-colors"
                       title="View weekly timetable"
                     >
                       <CalendarClock className="w-3.5 h-3.5" />
@@ -249,7 +249,7 @@ export function RoutesScreen() {
                         e.stopPropagation();
                         setSelectedRouteId(route.id);
                       }}
-                      className="p-1.5 rounded-lg bg-white/[0.03] border border-white/10 text-runway-400 hover:text-white hover:border-white/25 transition-colors"
+                      className="p-1.5 rounded-lg bg-white/3 border border-white/10 text-runway-400 hover:text-white hover:border-white/25 transition-colors"
                       title="Manage route"
                     >
                       <Pencil className="w-3.5 h-3.5" />
@@ -265,7 +265,7 @@ export function RoutesScreen() {
                         className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-bold border ${
                           i === 0
                             ? 'bg-sky-500/10 border-sky-500/30 text-sky-300'
-                            : 'bg-white/[0.04] border-white/10 text-white'
+                            : 'bg-white/4 border-white/10 text-white'
                         }`}
                       >
                         <StatusDot tone={i === 0 ? 'sky' : 'amber'} className="w-1.5 h-1.5" />
@@ -289,14 +289,14 @@ export function RoutesScreen() {
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
-                  <div className="rounded-lg bg-white/[0.03] border border-white/5 p-2.5">
+                  <div className="rounded-lg bg-white/3 border border-white/5 p-2.5">
                     <p className="text-xs text-runway-500 mb-1">Frequency</p>
                     <p className="text-sm font-medium text-white flex items-center gap-1.5">
                       <Repeat className="w-3.5 h-3.5 text-sky-400" />
                       {formatFrequency(route.frequency)}
                     </p>
                   </div>
-                  <div className="rounded-lg bg-white/[0.03] border border-white/5 p-2.5">
+                  <div className="rounded-lg bg-white/3 border border-white/5 p-2.5">
                     <div className="flex items-center justify-between mb-1.5">
                       <p className="text-xs text-runway-500">Demand</p>
                       <p className="text-xs font-medium text-sky-400">
@@ -305,14 +305,14 @@ export function RoutesScreen() {
                     </div>
                     <MeterBar value={route.demandScore !== undefined ? route.demandScore / 10 : 0} tone="sky" />
                   </div>
-                  <div className="rounded-lg bg-white/[0.03] border border-white/5 p-2.5">
+                  <div className="rounded-lg bg-white/3 border border-white/5 p-2.5">
                     <div className="flex items-center justify-between mb-1.5">
                       <p className="text-xs text-runway-500">Load Factor</p>
                       <p className="text-xs font-medium text-white">{formatPercentage(route.avgLoadFactor)}</p>
                     </div>
                     <MeterBar value={route.avgLoadFactor} />
                   </div>
-                  <div className="rounded-lg bg-white/[0.03] border border-white/5 p-2.5">
+                  <div className="rounded-lg bg-white/3 border border-white/5 p-2.5">
                     <p className="text-xs text-runway-500 mb-1">Profit</p>
                     <p className={`text-sm font-medium flex items-center gap-1.5 ${route.profitability >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                       {route.profitability >= 0 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
@@ -582,7 +582,7 @@ function RouteCreationForm({
         ) : (
           <div className="flex flex-wrap gap-2 mb-2">
             {stops.map((iata, i) => (
-              <span key={iata} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/[0.03] border border-white/10 text-xs">
+              <span key={iata} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/3 border border-white/10 text-xs">
                 <span className="text-runway-500">{i + 1}.</span>
                 <span className="font-semibold text-white">{iata}</span>
                 <button onClick={() => onStopsChange(stops.filter((s) => s !== iata))} className="text-runway-400 hover:text-red-400" title={`Remove stop ${iata}`}>
@@ -642,7 +642,7 @@ function RouteCreationForm({
         )}
 
         {aircraftType && pathAirports && rangeCheck && (
-          <div className="mt-3 rounded-lg bg-white/[0.03] border border-white/5 p-3">
+          <div className="mt-3 rounded-lg bg-white/3 border border-white/5 p-3">
             <div className="flex items-center gap-2 text-sm mb-2 flex-wrap">
               {rangeCheck.feasible ? (
                 <>
@@ -740,7 +740,7 @@ function RouteCreationForm({
         </div>
 
         {economics && (
-          <div className="rounded-lg bg-white/[0.03] border border-white/5 p-3">
+          <div className="rounded-lg bg-white/3 border border-white/5 p-3">
             <p className="text-xs font-medium text-runway-300 mb-2">Route Economics Preview</p>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
               <span className="text-runway-400">Demand score</span>
@@ -784,7 +784,7 @@ function RouteCreationForm({
                   className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${
                     isSelected
                       ? 'bg-sky-500/20 border-sky-400/50 text-white'
-                      : 'bg-white/[0.03] border-white/10 text-runway-300 hover:border-white/25 hover:text-white'
+                      : 'bg-white/3 border-white/10 text-runway-300 hover:border-white/25 hover:text-white'
                   }`}
                 >
                   <span className="font-semibold">{s.airport.iata}</span>
@@ -963,7 +963,7 @@ function RouteDetailModal({ route, ownedTypeIds, currencyFormat, onClose, onSave
           </div>
 
           {aircraftType && rangeCheck && (
-            <div className="mt-3 rounded-lg bg-white/[0.03] border border-white/5 p-3">
+            <div className="mt-3 rounded-lg bg-white/3 border border-white/5 p-3">
               <div className="flex items-center gap-2 text-sm mb-2 flex-wrap">
                 {rangeCheck.feasible ? (
                   <>
@@ -1007,19 +1007,19 @@ function RouteDetailModal({ route, ownedTypeIds, currencyFormat, onClose, onSave
 
         {/* --- Route stats --- */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="rounded-lg bg-white/[0.03] border border-white/5 p-3">
+          <div className="rounded-lg bg-white/3 border border-white/5 p-3">
             <p className="text-xs text-runway-500">{(route.stops?.length ?? 0) > 0 ? 'Loop Distance' : 'Distance'}</p>
             <p className="text-sm font-medium text-white">{distanceNm > 0 ? formatDistanceNm(distanceNm, units) : '—'}</p>
           </div>
-          <div className="rounded-lg bg-white/[0.03] border border-white/5 p-3">
+          <div className="rounded-lg bg-white/3 border border-white/5 p-3">
             <p className="text-xs text-runway-500">Flight Time</p>
             <p className="text-sm font-medium text-white">{route.flightTimeMin ? formatFlightTime(route.flightTimeMin) : '—'}</p>
           </div>
-          <div className="rounded-lg bg-white/[0.03] border border-white/5 p-3">
+          <div className="rounded-lg bg-white/3 border border-white/5 p-3">
             <p className="text-xs text-runway-500">Demand Score</p>
             <p className="text-sm font-medium text-sky-400">{route.demandScore !== undefined ? route.demandScore : '—'}</p>
           </div>
-          <div className="rounded-lg bg-white/[0.03] border border-white/5 p-3">
+          <div className="rounded-lg bg-white/3 border border-white/5 p-3">
             <p className="text-xs text-runway-500">Weeks in Service</p>
             <p className="text-sm font-medium text-white">{route.weeksActive ?? 0}</p>
           </div>
@@ -1027,7 +1027,7 @@ function RouteDetailModal({ route, ownedTypeIds, currencyFormat, onClose, onSave
 
         {/* --- Financial data --- */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="rounded-lg bg-white/[0.03] border border-white/5 p-4">
+          <div className="rounded-lg bg-white/3 border border-white/5 p-4">
             <p className="text-xs font-medium text-runway-300 mb-3">Current Weekly P&amp;L</p>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
               <span className="text-runway-400">Revenue</span>
@@ -1043,7 +1043,7 @@ function RouteDetailModal({ route, ownedTypeIds, currencyFormat, onClose, onSave
             </div>
           </div>
 
-          <div className="rounded-lg bg-white/[0.03] border border-white/5 p-4">
+          <div className="rounded-lg bg-white/3 border border-white/5 p-4">
             <p className="text-xs font-medium text-runway-300 mb-3">Current Projection</p>
             {economics ? (
               <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">

@@ -168,7 +168,7 @@ export function FleetScreen() {
                 key={typeId}
                 title={`${stats.free} free at hub · ${stats.deployed} deployed on routes · up to ${stats.usable} usable this week. Same-type aircraft can share routes within their workload.`}
                 className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs border ${
-                  stats.free > 0 ? 'bg-white/[0.03] border-white/10 text-runway-300' : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                  stats.free > 0 ? 'bg-white/3 border-white/10 text-runway-300' : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
                 }`}
               >
                 <Plane className="w-3 h-3" />

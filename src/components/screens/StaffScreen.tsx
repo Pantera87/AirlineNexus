@@ -364,7 +364,7 @@ export function StaffScreen() {
                     ? ` · needed is workload-sized: ${typeReq.weeklyHours.toFixed(0)} cycle-h/week ÷ ${sustainableWeeklyFlightHours().toFixed(1)} h per person → ${typeReq.sets} rotating crew set${typeReq.sets === 1 ? '' : 's'}`
                     : ''
                 }`}
-                className={`glass-panel px-3 py-2 min-w-[230px] ${
+                className={`glass-panel px-3 py-2 min-w-57.5 ${
                   m.coverageFactor < 1 ? 'border border-amber-500/30' : ''
                 }`}
               >
@@ -405,7 +405,7 @@ export function StaffScreen() {
             title={`Pursers and cabin crew are not type-specific — one shared pool covers every usable
               airframe. ${crewPlan.cabinPool.available} of ${crewPlan.cabinPool.required} required seats
               are filled; a shortfall scales all passenger types down proportionally.`}
-            className={`glass-panel px-3 py-2 min-w-[150px] ${
+            className={`glass-panel px-3 py-2 min-w-37.5 ${
               crewPlan.cabinPool.coverageFactor < 1 ? 'border border-amber-500/30' : ''
             }`}
           >
@@ -442,7 +442,7 @@ export function StaffScreen() {
             title={`Fleet-wide you need ${crewPlan.engineerRequired} engineer${
               crewPlan.engineerRequired === 1 ? '' : 's'
             } (1 per 5 aircraft); a shortfall raises maintenance costs by up to 50%.`}
-            className={`glass-panel px-3 py-2 min-w-[150px] ${
+            className={`glass-panel px-3 py-2 min-w-37.5 ${
               crewPlan.engineerShortfall > 0 ? 'border border-amber-500/30' : ''
             }`}
           >
@@ -647,7 +647,7 @@ export function StaffScreen() {
                       )}
                       {conversionOptions.length > 0 && (
                         <select
-                          className="text-[11px] bg-runway-800/60 text-runway-300 rounded-md px-2 py-1 border border-white/10 max-w-[180px]"
+                          className="text-[11px] bg-runway-800/60 text-runway-300 rounded-md px-2 py-1 border border-white/10 max-w-45"
                           value=""
                           onChange={(e) => {
                             if (e.target.value) handleConvert(m, e.target.value);

@@ -62,7 +62,7 @@ function RosterDayGrid({ days }: { days: Array<{ name: string; legs: TimetableLe
   return (
     <div className="grid grid-cols-7 gap-1.5">
       {days.map((d) => (
-        <div key={d.name} className={`rounded-md border p-1.5 min-h-[78px] flex flex-col gap-1 ${DAY_CELL_STYLES[d.status]}`}>
+        <div key={d.name} className={`rounded-md border p-1.5 min-h-19.5 flex flex-col gap-1 ${DAY_CELL_STYLES[d.status]}`}>
           <span className="text-[10px] font-semibold text-slate-300">{d.name}</span>
           <span className={`text-[9px] uppercase tracking-wide font-semibold ${DAY_STATUS_TEXT[d.status]}`}>
             {DAY_STATUS_LABEL[d.status]}
