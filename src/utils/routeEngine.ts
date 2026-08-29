@@ -1,5 +1,6 @@
 import { Airport, AircraftType, AircraftCategory } from '@/types/game';
 import { AIRCRAFT_DATABASE } from '@/data/aircraft';
+import { maxLoopsPerDay } from './crewRegulations';
 
 // ============================================================
 // Unit conversion
@@ -144,9 +145,15 @@ export function getRouteCycleMinutes(distanceNm: number, aircraft: AircraftType)
 /**
  * Maximum round-trip cycles a single aircraft can complete on this route in one day.
  * Cycles longer than 24h (very long-haul) still operate once per day with an overnight stay.
+ * Crew limits (FDP per day of duty) can further reduce the count for short cycles.
  */
 export function maxCyclesPerDay(distanceNm: number, aircraft: AircraftType): number {
-  return Math.max(1, Math.floor(1440 / getRouteCycleMinutes(distanceNm, aircraft)));
+  const cycleMin = getRouteCycleMinutes(distanceNm, aircraft);
+  if (cycleMin > 1440) return 1;
+  const clockCap = Math.floor(1440 / cycleMin);
+  // A 2-sector day of duty (out + back) — the flight-duty period caps short cycles.
+  const crewCap = maxLoopsPerDay(2, cycleMin);
+  return Math.max(1, Math.min(clockCap, crewCap));
 }
 
 /** Weekly frequency cap (round trips/week) for this route served by this aircraft. */
@@ -374,9 +381,17 @@ export function getLoopCycleMinutes(path: Airport[], aircraft: AircraftType): nu
   return total + path.length * getTurnaroundMinutes(aircraft);
 }
 
-/** Max full loop cycles per day given the cycle time (min 1). */
+/**
+ * Max full loop cycles per day given the cycle time (min 1). Cycles longer than
+ * 24h still operate once per day (overnight stay); the flight-duty-period cap
+ * (maxLoopsPerDay) limits short cycles the same way crew limits do in real ops.
+ */
 export function maxLoopCyclesPerDay(path: Airport[], aircraft: AircraftType): number {
-  return Math.max(1, Math.floor(1440 / getLoopCycleMinutes(path, aircraft)));
+  const cycleMin = getLoopCycleMinutes(path, aircraft);
+  if (cycleMin > 1440) return 1;
+  const clockCap = Math.floor(1440 / cycleMin);
+  const crewCap = maxLoopsPerDay(getLoopLegs(path).length, cycleMin);
+  return Math.max(1, Math.min(clockCap, crewCap));
 }
 
 /** Standard weekly frequency schedule options (full loop cycles per week). */

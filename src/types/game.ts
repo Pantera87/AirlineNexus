@@ -319,6 +319,22 @@ export interface Investment {
 
 // --- Staff Types ---
 
+/**
+ * One in-game week of recorded crew time for a pilot (most recent last).
+ * Kept per pilot in StaffMember.dutyHistory so the rolling flight/duty
+ * limits (EU-OSL style) can be enforced: each week appends one record —
+ * including zero-hour records for weeks spent on mandatory rest, so the
+ * sliding 7/14/28-day and 12-month windows advance correctly.
+ */
+export interface PilotDutyWeek {
+  /** ISO date (YYYY-MM-DD) of the week's Monday. */
+  weekStart: string;
+  /** Block hours flown by this pilot during the week. */
+  flightHours: number;
+  /** Duty hours the week consumed (flight hours × duty/flight ratio). */
+  dutyHours: number;
+}
+
 export interface StaffMember {
   id: string;
   name: string;
@@ -337,6 +353,11 @@ export interface StaffMember {
   typeRating: string | null;
   /** End of the reduced-wage period for unrated pilot hires (timestamp ms); null = no active period. */
   reducedWageUntil: number | null;
+  /**
+   * Rolling duty/flight-time history for crew-limit enforcement (flying crew:
+   * pilots + cabin crew, optional — old saves predate it). See crewRegulations.ts.
+   */
+  dutyHistory?: PilotDutyWeek[];
 }
 
 export type StaffRole =

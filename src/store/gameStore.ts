@@ -29,7 +29,6 @@ import {
   previewRouteEconomics,
   getAircraftWeeklyFixedCosts,
   maxFrequencyPerWeek,
-  getRouteCycleMinutes,
   DAILY_DUTY_HOURS,
   getRoutePath,
   calculateLoopDistanceNm,
@@ -37,12 +36,12 @@ import {
   checkLoopRange,
   maxLoopFrequencyPerWeek,
   getLoopLegs,
-  getLoopCycleMinutes,
   previewLoopEconomics,
 } from '@/utils/routeEngine';
 import { computeDispatchPlan } from '@/utils/fleetDispatcher';
 import type { RouteStaffing } from '@/utils/fleetDispatcher';
-import { computeCrewPlan, getCrewCoverageFactor } from '@/utils/crewDispatcher';
+import { computeCrewPlan, getCrewCoverageFactor, typeWeeklyCycleHours } from '@/utils/crewDispatcher';
+import { appendDutyWeek, isFlyingCrewRole, weekStartIsoOf } from '@/utils/crewRegulations';
 import {
   applyPromotion,
   convertTypeRating as applyTypeConversion,
@@ -1322,19 +1321,9 @@ export const useGameStore = create<GameStore>()(
             usableCountByType.set(ac.typeId, (usableCountByType.get(ac.typeId) ?? 0) + 1);
           }
         }
-        const neededHoursByType = new Map<string, number>();
-        for (const route of airline.routes) {
-          if (!route.isActive || !route.aircraftId) continue;
-          const type = findAircraftById(route.aircraftId);
-          if (!type || !route.distanceNm) continue;
-          // Full loop cycle hours: all legs + turnaround at every airport visited.
-          const pathAirports = resolveRoutePathAirports(route);
-          const cycleHours = (pathAirports ? getLoopCycleMinutes(pathAirports, type) : getRouteCycleMinutes(route.distanceNm, type)) / 60;
-          neededHoursByType.set(
-            route.aircraftId,
-            (neededHoursByType.get(route.aircraftId) ?? 0) + route.frequency * cycleHours
-          );
-        }
+        // Weekly CYCLE-hours each type's routes demand — shared with the Staff
+        // screen's workload-sized crew requirements (utils/crewDispatcher).
+        const neededHoursByType = typeWeeklyCycleHours(airline.routes);
         // Crew manning: under-crewed types can't fly — their operations scale down by the
         // coverage factor (rated-vs-requirement, or a flat 0.5 for unrated coverage).
         const crewPlan = computeCrewPlan(airline.staff ?? [], airline.fleet ?? []);
@@ -1416,31 +1405,37 @@ export const useGameStore = create<GameStore>()(
 
         const totalProfit = totalRevenue - totalCosts;
 
-        // Weekly flying-hours accrual (real week boundaries only): each pilot's assigned
-        // aircraft types contribute that type's required cycle hours, shared among the
-        // pilots staffed on them and capped by the weekly duty limit.
+        // Weekly flying-hours accrual (real week boundaries only): each aircraft
+        // type's flying crew (pilots + cabin crew) share that type's required
+        // cycle hours, capped per person by the weekly crew-time regulation limit.
         let staffWithHours: StaffMember[] | null = null;
         if (boundary) {
           const staff = airline.staff ?? [];
+          const weekStartIso = weekStartIsoOf(state.currentDate);
           const staffedIdsByType = new Map<string, Set<string>>();
           for (const m of staff) {
-            if (m.role !== 'captain' && m.role !== 'first-officer') continue;
+            if (!isFlyingCrewRole(m.role)) continue;
             const ac = (airline.fleet ?? []).find((a) => a.id === m.assignedAircraft);
             if (!ac) continue;
             const ids = staffedIdsByType.get(ac.typeId) ?? new Set<string>();
             ids.add(m.id);
             staffedIdsByType.set(ac.typeId, ids);
           }
-          const hoursById = new Map<string, number>();
+          const updatedById = new Map<string, StaffMember>();
           for (const [typeId, hours] of neededHoursByType) {
             const ids = staffedIdsByType.get(typeId);
             if (!ids || hours <= 0) continue;
-            const pilots = staff.filter((m) => ids.has(m.id));
-            for (const u of accrueWeeklyFlyingHours(pilots, hours)) hoursById.set(u.id, u.flightHours);
+            const crew = staff.filter((m) => ids.has(m.id));
+            for (const u of accrueWeeklyFlyingHours(crew, hours, weekStartIso)) updatedById.set(u.id, u);
           }
-          if (hoursById.size > 0) {
-            staffWithHours = staff.map((m) => (hoursById.has(m.id) ? { ...m, flightHours: hoursById.get(m.id)! } : m));
+          // Record the week (0 h) for every other flying crew member so their rolling
+          // 7/14/28-day and 12-month windows slide forward over rest weeks — otherwise
+          // a crew member who maxed a limit would stay on mandatory rest forever.
+          for (const m of staff) {
+            if (!isFlyingCrewRole(m.role) || updatedById.has(m.id)) continue;
+            updatedById.set(m.id, appendDutyWeek(m, 0, weekStartIso));
           }
+          staffWithHours = staff.map((m) => updatedById.get(m.id) ?? m);
         }
 
         // Store the plan so accrueFinances() can stream this week's economics into cash.
@@ -1672,6 +1667,9 @@ export const useGameStore = create<GameStore>()(
         if (state?.airline?.routes?.length) {
           setTimeout(regenerateMissingTimetables, 0);
         }
+        if (state?.airline?.staff?.length) {
+          setTimeout(seedMissingDutyHistory, 0);
+        }
       },
       // Don't persist certain volatile state
       partialize: (state) => ({
@@ -1754,4 +1752,22 @@ function regenerateMissingTimetables(): void {
   if (changed) {
     useGameStore.setState({ airline: { ...airline, routes } });
   }
+}
+
+// Lazy crew-regulation migration: saves created before EU-OSL rolling duty tracking
+// have no dutyHistory, so the roster's monthly/yearly usage bars stay hidden until
+// the next week boundary settlement. Seed a zero-hour record for the current
+// (Monday) week so the bars appear immediately; the next boundary settlement then
+// merges real flying hours into that same week record.
+function seedMissingDutyHistory(): void {
+  const state = useGameStore.getState();
+  const airline = state.airline;
+  if (!airline?.staff?.length || !(state.currentDate instanceof Date)) return;
+  const missing = airline.staff.filter(
+    (m) => isFlyingCrewRole(m.role) && (!m.dutyHistory || m.dutyHistory.length === 0),
+  );
+  if (missing.length === 0) return;
+  const weekStartIso = weekStartIsoOf(state.currentDate);
+  const staff = airline.staff.map((m) => (missing.includes(m) ? appendDutyWeek(m, 0, weekStartIso) : m));
+  useGameStore.setState({ airline: { ...airline, staff } });
 }

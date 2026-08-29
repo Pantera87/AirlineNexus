@@ -14,7 +14,23 @@ import {
   pilotMarketSalary,
   nonPilotMarketSalary,
 } from '@/utils/staffEngine';
-import { computeCrewPlan } from '@/utils/crewDispatcher';
+import {
+  computeCrewPlan,
+  computeStaffingStatus,
+  computeTypeCrewRequirements,
+  isUsableAircraft,
+  type AircraftCrewManning,
+  type TypeCrewRequirement,
+} from '@/utils/crewDispatcher';
+import {
+  isFlyingCrewRole,
+  isOnMandatoryRest,
+  pilotDutyWindows,
+  sustainableWeeklyFlightHours,
+  DUTY_28D_HOURS,
+  FLIGHT_TIME_28D_HOURS,
+  FLIGHT_TIME_12MO_HOURS,
+} from '@/utils/crewRegulations';
 import { MeterBar, StatusPill } from '@/components/icons/StatusIcons';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -28,6 +44,7 @@ import {
   Wrench,
   Activity,
   DollarSign,
+  Moon,
 } from 'lucide-react';
 
 // --- Static role metadata for the UI ----------------------------------------
@@ -43,9 +60,64 @@ const ROSTER_FILTERS: { id: StaffRole | 'all'; label: string }[] = [
 
 const HIRABLE_ROLES: StaffRole[] = ['captain', 'first-officer', 'purser', 'cabin-crew', 'engineer'];
 
+/** Roles shown on the per-type manning cards (key into AircraftCrewManning). */
+const MANNING_ROLES: Array<{
+  key: 'captain' | 'firstOfficer' | 'purser' | 'cabinCrew';
+  short: string;
+  full: string;
+}> = [
+  { key: 'captain', short: 'Capt', full: 'Captain' },
+  { key: 'firstOfficer', short: 'FO', full: 'First Officer' },
+  { key: 'purser', short: 'Purser', full: 'Purser' },
+  { key: 'cabinCrew', short: 'Cabin', full: 'Cabin Crew' },
+];
+
+/**
+ * Per-role manning rows for a type card: route-workload-sized needed (rotating
+ * crew sets × per-airframe minimum) vs actually assigned. Returns [] when the
+ * type has no active routes — no crew required yet.
+ */
+function manningRoleRows(m: AircraftCrewManning, routeReq?: TypeCrewRequirement) {
+  if (!routeReq) return [];
+  return MANNING_ROLES.map((r) => ({
+    ...r,
+    needed: routeReq[r.key],
+    have: m.maned[r.key],
+  })).filter((r) => r.needed > 0 || r.have > 0);
+}
+
 /** Market salary preview for a candidate (used to label hiring cards). */
 function candidateMarketSalary(m: StaffMember): number {
   return isPilotRole(m.role) ? pilotMarketSalary(m.role, m.flightHours) : nonPilotMarketSalary(m.role, m.experience);
+}
+
+/** One rolling-window regulation limit expressed against the pilot's weekly duty history. */
+interface DutyWindowUsage {
+  label: string;
+  used: number;
+  cap: number;
+  fraction: number;
+}
+
+/**
+ * The monthly and yearly rolling windows shown on each pilot card: the 28-day
+ * (monthly) flight-time and duty-time limits and the 12-month (yearly) flight-
+ * time limit. Returns [] for pilots with no duty history recorded yet.
+ */
+function dutyWindowRows(m: StaffMember): DutyWindowUsage[] {
+  if (!m.dutyHistory || m.dutyHistory.length === 0) return [];
+  const w = pilotDutyWindows(m);
+  const rows: Array<Omit<DutyWindowUsage, 'fraction'>> = [
+    { label: 'Monthly flight (28d)', cap: FLIGHT_TIME_28D_HOURS, used: w.flight28d },
+    { label: 'Monthly duty (28d)', cap: DUTY_28D_HOURS, used: w.duty28d },
+    { label: 'Yearly flight (12mo)', cap: FLIGHT_TIME_12MO_HOURS, used: w.flight12mo },
+  ];
+  return rows.map((r) => ({ ...r, fraction: Math.min(1, r.used / r.cap) }));
+}
+
+/** Regulation usage is inverted vs. a health meter: the closer to the cap, the hotter. */
+function usageTone(fraction: number): 'green' | 'amber' | 'red' {
+  return fraction >= 1 ? 'red' : fraction >= 0.7 ? 'amber' : 'green';
 }
 
 /**
@@ -111,6 +183,33 @@ export function StaffScreen() {
 
   // Live crew plan: who is assigned where + manning per type + engineer shortfall.
   const crewPlan = computeCrewPlan(staff, fleet);
+
+  // Workload-sized crew requirements per type (EU-OSL rotation sets) + how
+  // under/over-staffed each department is vs that workload.
+  const typeReqs = computeTypeCrewRequirements(airline.routes);
+  const staffingStatus = computeStaffingStatus(airline.routes, staff, fleet);
+  const pilotBreakdown = staffingStatus.find((d) => d.key === 'pilots')?.pilotBreakdown ?? [];
+  const cabinDetail = staffingStatus.find((d) => d.key === 'cabin')?.cabinDetail;
+  const engineersRow = staffingStatus.find((d) => d.key === 'engineers');
+  const unratedPilots = staff.filter(
+    (m) => (m.role === 'captain' || m.role === 'first-officer') && m.typeRating === null
+  ).length;
+  // Analytical hiring requirement: exactly how many are still missing, per type
+  // rating (pilots) and per role (pursers, cabin crew, engineers).
+  const requiredList: string[] = [];
+  for (const b of pilotBreakdown) {
+    const typeName = getAircraftById(b.typeId)?.name ?? b.typeId;
+    if (b.missingCaptains > 0) requiredList.push(`${b.missingCaptains} ${typeName}-rated captains`);
+    if (b.missingFirstOfficers > 0)
+      requiredList.push(`${b.missingFirstOfficers} ${typeName}-rated first officers`);
+  }
+  if (cabinDetail) {
+    if (cabinDetail.purser.missing > 0) requiredList.push(`${cabinDetail.purser.missing} pursers`);
+    if (cabinDetail.cabinCrew.missing > 0)
+      requiredList.push(`${cabinDetail.cabinCrew.missing} cabin crew`);
+  }
+  if (engineersRow && engineersRow.missing > 0)
+    requiredList.push(`${engineersRow.missing} engineer${engineersRow.missing === 1 ? '' : 's'}`);
 
   // Distinct aircraft types in the fleet — the only sensible type-rating targets.
   const fleetTypeIds = [...new Set(fleet.map((a) => a.typeId))];
@@ -208,29 +307,153 @@ export function StaffScreen() {
         </div>
       </div>
 
+      {/* Staffing status: how under/over-staffed each department is vs the route workload */}
+      <div className="glass-panel p-4">
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+            <Users className="w-4 h-4 text-runway-400" />
+            Staffing status
+          </h2>
+          <p className="text-[10px] text-runway-500 text-right">
+            Required = route workload ÷ {sustainableWeeklyFlightHours().toFixed(1)} sustainable flight h per person
+            per week (EU-OSL)
+          </p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {staffingStatus.map((d) => (
+            <div key={d.key} className="rounded-lg border border-white/10 bg-white/5 p-3">
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <span className="text-xs font-medium text-white">{d.label}</span>
+                {d.delta < 0 ? (
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-red-500/10 border-red-500/30 text-red-300">
+                    Understaffed by {Math.abs(d.delta)}
+                  </span>
+                ) : d.delta > 0 ? (
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-amber-500/10 border-amber-500/30 text-amber-300">
+                    Overstaffed by {d.delta}
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-green-500/10 border-green-500/20 text-green-300">
+                    Fully staffed
+                  </span>
+                )}
+              </div>
+              <MeterBar value={d.required === 0 ? 1 : Math.min(1, d.available / d.required)} />
+              <p className="text-[11px] text-runway-500 mt-1">{d.available}/{d.required} required</p>
+            </div>
+          ))}
+        </div>
+        {/* Analytical requirement: exactly how many are still missing per type rating / role */}
+        <div className="mt-3 pt-3 border-t border-white/10">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-runway-500 mb-1.5">
+            Required (still missing)
+          </p>
+          {requiredList.length > 0 ? (
+            <ul className="flex flex-col gap-0.5">
+              {requiredList.map((item) => (
+                <li key={item} className="text-[11px] font-semibold text-red-300">
+                  ▸ {item} needed
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-[11px] text-green-300">
+              No hiring shortages — all departments are fully staffed.
+            </p>
+          )}
+        </div>
+        {pilotBreakdown.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-white/10">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-runway-500 mb-1.5">
+              Pilot requirement by type rating
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
+              {pilotBreakdown.map((b) => {
+                const typeName = getAircraftById(b.typeId)?.name ?? b.typeId;
+                const rated = b.ratedCaptains + b.ratedFirstOfficers;
+                const need = b.captain + b.firstOfficer;
+                const ok = rated >= need;
+                return (
+                  <div
+                    key={b.typeId}
+                    title={`${b.sets} rotating crew set${b.sets === 1 ? '' : 's'}: ${b.captain} captains + ${b.firstOfficer} first officers rated for ${typeName} · ${b.ratedCaptains} captains + ${b.ratedFirstOfficers} first officers currently hold the rating (unrated pilots can be converted)`}
+                    className={`flex items-center justify-between gap-2 text-[11px] rounded px-2 py-1.5 ${
+                      ok ? 'bg-white/5' : 'bg-amber-500/10 border border-amber-500/20'
+                    }`}
+                  >
+                    <span className="text-white font-medium">{typeName}</span>
+                    <span className={`tabular-nums whitespace-nowrap ${ok ? 'text-runway-400' : 'text-amber-300 font-semibold'}`}>
+                      {b.captain}× Capt + {b.firstOfficer}× FO · {rated}/{need} rated
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            {unratedPilots > 0 && (
+              <p className="text-[10px] text-runway-500 mt-1.5">
+                {unratedPilots} unrated pilot{unratedPilots === 1 ? '' : 's'} on payroll — can be rated for any
+                type via a paid type conversion.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Crew manning summary: per-type manning + engineers */}
       {Object.keys(crewPlan.manningByType).length > 0 && (
         <div className="flex flex-wrap gap-2">
           {Object.values(crewPlan.manningByType).map((m) => {
             const type = getAircraftById(m.typeId);
+            const typeReq = typeReqs[m.typeId];
+            const rows = manningRoleRows(m, typeReq);
+            const shortages = rows.filter((r) => r.have < r.needed);
             return (
               <div
                 key={m.typeId}
                 title={`${m.fullyMannedAircraft} of ${m.usableAircraft} usable ${
                   type?.name ?? m.typeId
-                } airframe${m.usableAircraft === 1 ? '' : 's'} with a complete crew · ${m.maned.captain}/
-                  ${m.required.captain} captains, ${m.maned.firstOfficer}/${m.required.firstOfficer} FOs, ${
-                  m.maned.purser
-                }/${m.required.purser} pursers, ${m.maned.cabinCrew}/${m.required.cabinCrew} cabin crew`}
-                className={`glass-panel px-3 py-2 min-w-[180px] ${
+                } airframe${m.usableAircraft === 1 ? '' : 's'} with a complete crew · crew is pooled per type
+                  and moves freely between same-type airframes${
+                  typeReq
+                    ? ` · needed is workload-sized: ${typeReq.weeklyHours.toFixed(0)} cycle-h/week ÷ ${sustainableWeeklyFlightHours().toFixed(1)} h per person → ${typeReq.sets} rotating crew set${typeReq.sets === 1 ? '' : 's'}`
+                    : ''
+                }`}
+                className={`glass-panel px-3 py-2 min-w-[230px] ${
                   m.coverageFactor < 1 ? 'border border-amber-500/30' : ''
                 }`}
               >
                 <div className="flex items-center gap-1.5 text-xs font-medium text-white mb-1">
                   <Plane className="w-3.5 h-3.5 text-runway-400" />
                   {type?.name ?? m.typeId}
+                  <span className="text-[10px] font-normal text-runway-500">
+                    × {m.usableAircraft} airframe{m.usableAircraft === 1 ? '' : 's'}
+                  </span>
                 </div>
                 <MeterBar value={m.coverageFactor} />
+                {rows.length > 0 ? (
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {rows.map((r) => (
+                      <span
+                        key={r.key}
+                        title={`${r.full}s: ${r.have} assigned of ${r.needed} needed`}
+                        className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                          r.have >= r.needed
+                            ? 'bg-green-500/10 border-green-500/20 text-green-300'
+                            : 'bg-amber-500/10 border-amber-500/30 text-amber-300 font-semibold'
+                        }`}
+                      >
+                        {r.short} {r.have}/{r.needed}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-runway-500 mt-1.5">No active routes for this type yet</p>
+                )}
+                {shortages.length > 0 && (
+                  <p className="text-[11px] font-semibold text-amber-300 mt-1">
+                    Needs: {shortages.map((r) => `${r.needed - r.have}× ${r.full}`).join(', ')}
+                  </p>
+                )}
                 <p className="text-[11px] text-runway-500 mt-1">
                   {m.fullyMannedAircraft}/{m.usableAircraft} fully crewed
                 </p>
@@ -296,11 +519,35 @@ export function StaffScreen() {
             <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
               {visibleStaff.map((m) => {
                 const assigned = fleet.find((a) => a.id === m.assignedAircraft) ?? null;
+                const assignedType = assigned ? getAircraftById(assigned.typeId) ?? null : null;
+                const poolSize = assigned
+                  ? fleet.filter((a) => a.typeId === assigned.typeId && isUsableAircraft(a)).length
+                  : 0;
+                const poolTitle = assigned
+                  ? `${assignedType?.manufacturer ?? ''} ${assignedType?.name ?? assigned.typeId} crew pool — ${
+                      poolSize
+                    } usable airframe${poolSize === 1 ? '' : 's'}. Crew interchanges freely between same-type aircraft; the
+                  dispatcher picks the exact tail.${
+                    isPilotRole(m.role)
+                      ? m.typeRating === assigned.typeId
+                        ? ` ${m.name.split(' ')[0]} is type rated for ${
+                            assignedType?.name ?? assigned.typeId
+                          } and can fly any airframe in the pool.`
+                        : m.typeRating === null
+                          ? ` ${m.name.split(' ')[0]} has no type rating for ${
+                              assignedType?.name ?? assigned.typeId
+                            } yet — unrated pilots still fly, at reduced wage until re-rated.`
+                          : ''
+                      : ' No type rating required for this role.'
+                  }`
+                  : 'Unassigned — no slot for this member right now';
                 const ratingType = m.typeRating ? getAircraftById(m.typeRating) : null;
                 const eligibility = getPromotionEligibility(m);
                 const market = candidateMarketSalary(m);
                 const underpaid = m.salary < market * 0.95;
                 const conversionOptions = isPilotRole(m.role) ? fleetTypeIds.filter((t) => t !== m.typeRating) : [];
+                const onMandatoryRest = isFlyingCrewRole(m.role) && isOnMandatoryRest(m);
+                const dutyRows = isFlyingCrewRole(m.role) ? dutyWindowRows(m) : [];
 
                 return (
                   <div key={m.id} className="glass-panel p-4 space-y-2.5">
@@ -312,17 +559,17 @@ export function StaffScreen() {
                           <p className="text-sm font-semibold text-white truncate">{m.name}</p>
                           <p className="text-xs text-runway-400">
                             {ROLE_LABELS[m.role]}
-                            {isPilotRole(m.role) && ` · ${formatNumber(m.flightHours)} hrs`}
-                            {!isPilotRole(m.role) && ` · ${m.experience} yrs exp`}
+                            {isFlyingCrewRole(m.role) && ` · ${formatNumber(m.flightHours)} hrs`}
+                            {m.role === 'engineer' && ` · ${m.experience} yrs exp`}
                           </p>
                         </div>
                       </div>
                       <StatusPill
                         tone={assigned ? 'green' : 'amber'}
-                        title={assigned ? `Assigned to ${assigned.registration}` : 'Unassigned — no slot for this member right now'}
+                        title={poolTitle}
                       >
                         <Plane className="w-3 h-3" />
-                        {assigned ? assigned.registration : 'Unassigned'}
+                        {assigned ? `${assignedType?.name ?? assigned.typeId} pool` : 'Unassigned'}
                       </StatusPill>
                     </div>
 
@@ -344,6 +591,15 @@ export function StaffScreen() {
                           <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-red-500/10 border border-red-500/20 text-red-300">
                             <DollarSign className="w-3 h-3" />
                             Reduced wage · {Math.round(REDUCED_WAGE_MULTIPLIER * 100)}% market
+                          </span>
+                        )}
+                        {onMandatoryRest && (
+                          <span
+                            className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-red-500/15 border border-red-500/30 text-red-300"
+                            title="A rolling flight/duty-time limit is exhausted. This crew member is on mandatory rest and cannot be assigned to flights until enough weeks pass."
+                          >
+                            <Moon className="w-3 h-3" />
+                            Mandatory rest
                           </span>
                         )}
                       </div>
@@ -376,6 +632,23 @@ export function StaffScreen() {
                           )}
                         </span>
                       </p>
+                      {dutyRows.length > 0 && (
+                        <div className="col-span-2 space-y-1.5">
+                          {dutyRows.map((r) => (
+                            <div key={r.label}>
+                              <div className="flex justify-between text-[11px] text-runway-500 mb-0.5">
+                                <span title="EU-OSL-style rolling limit for this crew member — hit it and they go on mandatory rest.">
+                                  {r.label}
+                                </span>
+                                <span>
+                                  {r.used.toFixed(1)}/{r.cap} h
+                                </span>
+                              </div>
+                              <MeterBar value={r.fraction} tone={usageTone(r.fraction)} height="h-1" />
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     {/* Actions */}

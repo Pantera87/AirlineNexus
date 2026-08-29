@@ -10,6 +10,7 @@ import type { AircraftCategory, StaffMember, StaffRole } from '@/types/game';
 import { getAircraftById } from '@/data/aircraft';
 import { clamp, formatCurrency, formatNumber, generateId, randomBetween, randomChoice } from './helpers';
 import { DAILY_DUTY_HOURS } from './routeEngine';
+import { appendDutyWeek, weeklyRemainingFlightHours } from './crewRegulations';
 
 // --- Role metadata ---------------------------------------------------------
 
@@ -366,24 +367,32 @@ export function applyMonthlyMoraleUpdate(staff: StaffMember[]): StaffMember[] {
 // Pilots accrue flying hours each week. The needed hours per aircraft type come
 // from the route settlement (utilization of the fleet); the store distributes
 // them across the rated, ASSIGNED pilots of that type via accrueWeeklyFlyingHours.
-// Every pilot is capped at the weekly duty limit.
+// Every pilot's weekly intake is capped by the rolling crew-time limits
+// (crewRegulations.ts) — the tightest window wins.
 
-/** Weekly duty cap in flying hours per pilot (matches the fleet utilization model). */
+/** Weekly duty cap in flying hours per pilot (fleet-utilization safety ceiling). */
 export const WEEKLY_DUTY_CAP_HOURS = DAILY_DUTY_HOURS * 7;
 
 /**
  * Distribute `typeHours` of weekly flying hours across the given pilots
  * (already filtered to rated + assigned pilots of one aircraft type).
- * Pure — returns updated members with rounded hours, capped per pilot.
+ * Each pilot may take at most min(weekly regulation allowance, WEEKLY_DUTY_CAP_HOURS)
+ * flight hours; a duty-history record for `weekStartIso` is appended to every
+ * pilot in the list — 0 h for those who hit their limit (a rest week) so the
+ * rolling windows slide forward. Pure — returns updated members.
  */
-export function accrueWeeklyFlyingHours(pilots: StaffMember[], typeHours: number): StaffMember[] {
-  if (typeHours <= 0 || pilots.length === 0) return pilots;
+export function accrueWeeklyFlyingHours(pilots: StaffMember[], typeHours: number, weekStartIso: string): StaffMember[] {
+  if (pilots.length === 0) return pilots;
 
   const out: StaffMember[] = pilots.map((p) => ({ ...p, flightHours: Math.round(p.flightHours * 10) / 10 }));
-  const remainingCap = out.map((p) => Math.max(0, WEEKLY_DUTY_CAP_HOURS - p.flightHours));
+  if (typeHours <= 0) return out.map((p) => appendDutyWeek(p, 0, weekStartIso));
+
+  // Remaining regulation allowance (flight hours) per pilot for the week.
+  const remainingCap = out.map((p) => Math.max(0, Math.min(weeklyRemainingFlightHours(p), WEEKLY_DUTY_CAP_HOURS)));
+  const shareGiven: number[] = out.map(() => 0);
   let remaining = typeHours;
 
-  // Evenly split each round among pilots who still have weekly capacity.
+  // Evenly split each round among pilots who still have capacity.
   for (let round = 0; round < 64 && remaining > 1e-9; round++) {
     const aliveIdx: number[] = [];
     for (let i = 0; i < out.length; i++) if (remainingCap[i] > 1e-9) aliveIdx.push(i);
@@ -394,10 +403,11 @@ export function accrueWeeklyFlyingHours(pilots: StaffMember[], typeHours: number
     for (const i of aliveIdx) {
       out[i].flightHours = Math.round((out[i].flightHours + share) * 10) / 10;
       remainingCap[i] -= share;
+      shareGiven[i] = Math.round((shareGiven[i] + share) * 10) / 10;
       remaining -= share;
     }
   }
-  return out;
+  return out.map((p, i) => appendDutyWeek(p, shareGiven[i], weekStartIso));
 }
 
 // --- Monthly payroll & wage reversion ----------------------------------------
