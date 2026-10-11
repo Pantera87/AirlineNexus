@@ -1,0 +1,17 @@
+# Airline Nexus — home-lab deployment
+#
+# Start:    docker compose up
+# Stop:     docker compose down
+# Rebuild:  docker compose up --build
+#
+# Override the port (e.g. to 8080):
+#   echo "AIRLINE_NEXUS_PORT=8080" > .env
+#   docker compose up
+
+services:
+  airline-nexus:
+    build: .
+    container_name: airline-nexus
+    ports:
+      - "${AIRLINE_NEXUS_PORT:-4242}:80"
+    restart: unless-stopped

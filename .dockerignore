@@ -1,0 +1,49 @@
+# Build artifacts
+node_modules
+dist
+dist-ssr
+build
+
+# Vite caches
+.vite
+node_modules/.vite
+*.local
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Source data (large CSV — generated TS is committed; CSV not needed at runtime)
+world-airports.csv
+
+# Internal design documents
+docs
+
+# Test output
+coverage
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Caches
+.eslintcache
+.cache
+
+# Editor
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
