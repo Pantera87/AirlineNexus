@@ -24,7 +24,7 @@ export default function AircraftImage({
     full: 'w-full aspect-square', // fills parent width
   };
 
-  const src = `/images/aircraft/${aircraftId}/image.jpg`;
+  const src = `/images/aircraft/${aircraftId}/image.png`;
 
   return (
     <div className={`relative overflow-hidden rounded-lg ${sizeClasses[size]} ${className}`}>
