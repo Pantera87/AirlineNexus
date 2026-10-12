@@ -172,11 +172,11 @@ export type AirportSize = 'small' | 'medium' | 'large' | 'hub';
 
 export interface Route {
   id: string;
-  origin: string; // airport IATA — always the airline's hub
-  destination: string; // airport IATA — last airport before returning to the hub
+  origin: string; // airport IATA — the airline's hub for scheduled routes; the mission base for charters
+  destination: string; // airport IATA — last airport before returning to the origin
   stops?: string[]; // intermediate airports in flight order (multi-hop loop), e.g. ['LHR','CDG'] → HUB→LHR→CDG→DEST→HUB
   isActive: boolean;
-  frequency: number; // round trips (cycles) per week, capped by aircraft cycle time (see routeEngine.maxFrequencyPerWeek)
+  frequency: number; // scheduled: round trips (cycles) per week; charter: revenue trips per week — capped by aircraft cycle time (see routeEngine)
   aircraftId: string;
   schedule: FlightSchedule[];
   avgLoadFactor: number; // 0-1
@@ -193,6 +193,13 @@ export interface Route {
   fareMultiplier?: number;
   /** Generated weekly timetable — hub-local departure/arrival times for every scheduled cycle (see utils/timetable). */
   timetable?: RouteSchedule;
+  /**
+   * Operation mode of this route. 'charter' = a point-to-point charter mission: `origin` is the
+   * mission base (NOT necessarily the airline's hub), there are no intermediate stops, `frequency`
+   * counts revenue trips per week (each rotation deadheads one empty leg back to the base) and no
+   * timetable is generated. Absent = 'scheduled' hub loop (all existing saves).
+   */
+  operationType?: 'scheduled' | 'charter';
 }
 
 export interface FlightSchedule {
@@ -253,7 +260,12 @@ export interface Airline {
   achievements: Achievement[];
 }
 
-export type BusinessModel = 'low-cost' | 'full-service' | 'luxury' | 'cargo' | 'hybrid';
+/**
+ * `charter` is a distinct point-to-point operation mode: missions are flown
+ * between any two airports (no hub requirement) with business-jet/turboprop/regional
+ * airframes, and every rotation carries one revenue leg plus an empty repositioning leg.
+ */
+export type BusinessModel = 'low-cost' | 'full-service' | 'luxury' | 'cargo' | 'hybrid' | 'charter';
 
 // --- Finance Types ---
 

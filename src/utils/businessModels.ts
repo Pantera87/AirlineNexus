@@ -13,11 +13,16 @@
 // cheaper prices raise load factor (slope 0.5), pricier ones decay it as
 // ratio^-2 — so the recommended price is the structural profit sweet spot.
 //
+// The `charter` model is an operation MODE, not just a pricing profile: its
+// missions are point-to-point (see routeEngine's charter* functions), so it
+// additionally carries an aircraft-category gate, a demand multiplier and the
+// cost multiplier applied to the empty repositioning leg.
+//
 // Every number here is data, not gameplay code: tune a model by editing its
 // record entry below.
 // ============================================================
 
-import type { BusinessModel } from '@/types/game';
+import type { BusinessModel, AircraftCategory, AircraftType } from '@/types/game';
 
 export interface BusinessModelConfig {
   id: BusinessModel;
@@ -35,6 +40,16 @@ export interface BusinessModelConfig {
   loadFactorModifier: number;
   /** Multiplier on hourly crew/cabin operating costs. */
   hourlyCostModifier: number;
+  /**
+   * Charter-only (operation-mode constraints). Absent for every other model, so
+   * existing code paths and saves are untouched.
+   */
+  /** Aircraft categories allowed to fly this model's missions (absent = no category gate). */
+  allowedAircraftCategories?: AircraftCategory[];
+  /** Multiplier on the point-to-point charter demand score (mission attractiveness). */
+  charterDemandFactor?: number;
+  /** Cost multiplier applied to the empty repositioning leg of each charter rotation. */
+  deadheadCostFactor?: number;
 }
 
 export const BUSINESS_MODEL_CONFIGS: Record<BusinessModel, BusinessModelConfig> = {
@@ -82,6 +97,21 @@ export const BUSINESS_MODEL_CONFIGS: Record<BusinessModel, BusinessModelConfig> 
     loadFactorModifier: 1.0,
     hourlyCostModifier: 1.0,
   },
+  charter: {
+    id: 'charter',
+    label: 'Charter & Corporate Flights',
+    description: 'Point-to-point private missions on demand — no hub network.',
+    strategy:
+      'Fly missions, not schedules — each rotation carries passengers one way and returns empty, so high-value pairs on business jets win; no ticket pricing, the client sets the fare.',
+    comingSoon: false,
+    fareMultiplier: 1.6,
+    onboardRevenuePerPax: 12,
+    loadFactorModifier: 1.0,
+    hourlyCostModifier: 1.15,
+    allowedAircraftCategories: ['business-jet', 'turboprop', 'regional'],
+    charterDemandFactor: 1.25,
+    deadheadCostFactor: 1.0,
+  },
   hybrid: {
     id: 'hybrid',
     label: 'Hybrid Model',
@@ -102,4 +132,14 @@ export const BUSINESS_MODEL_CONFIGS: Record<BusinessModel, BusinessModelConfig> 
 export function getBusinessModelConfig(model?: BusinessModel | null): BusinessModelConfig {
   if (model && BUSINESS_MODEL_CONFIGS[model]) return BUSINESS_MODEL_CONFIGS[model];
   return BUSINESS_MODEL_CONFIGS['full-service'];
+}
+
+/**
+ * Whether an aircraft type may serve this business model. Models without a category
+ * gate accept anything (all existing models); `charter` only accepts business jets,
+ * turboprops and regional jets — the airframes that actually fly missions.
+ */
+export function isAircraftAllowedForModel(model: BusinessModel | null | undefined, type: AircraftType): boolean {
+  const allowed = getBusinessModelConfig(model).allowedAircraftCategories;
+  return !allowed || allowed.includes(type.category);
 }

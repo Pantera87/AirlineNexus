@@ -37,7 +37,13 @@ import {
   maxLoopFrequencyPerWeek,
   getLoopLegs,
   previewLoopEconomics,
+  previewCharterEconomics,
+  scoreCharterDemand,
+  buildCharterTripOptions,
+  maxCharterFrequencyPerWeek,
+  charterCycleMinutes,
 } from '@/utils/routeEngine';
+import { isAircraftAllowedForModel } from '@/utils/businessModels';
 import { computeDispatchPlan } from '@/utils/fleetDispatcher';
 import type { RouteStaffing } from '@/utils/fleetDispatcher';
 import { computeCrewPlan, getCrewCoverageFactor, typeWeeklyCycleHours } from '@/utils/crewDispatcher';
@@ -202,6 +208,9 @@ interface GameStore extends GameState {
     aircraftType?: string;
     frequencyPerWeek?: number;
     fareMultiplier?: number; // player-set fare as a multiple of the model's recommended price (clamped 0.5–2.0)
+    /** Charter mission: point-to-point call-out from an aircraft base — skips the hub policy,
+      has no stops, no timetable and no player fare (the charterer names the fare per trip). */
+    charter?: boolean;
   }) => boolean;
   updateRoute: (
     routeId: string,
@@ -1051,14 +1060,74 @@ export const useGameStore = create<GameStore>()(
       },
 
       // Route management
-      createRoute: ({ origin, destination, stops = [], aircraftType, frequencyPerWeek, fareMultiplier }) => {
+      createRoute: ({ origin, destination, stops = [], aircraftType, frequencyPerWeek, fareMultiplier, charter = false }) => {
         const state = get();
         const airline = state.airline;
         if (!airline) return false;
 
-        // Hub policy: every route must begin AND end at the airline's hub.
-        if (origin !== airline.headquarters) return false;
+        // Hub policy: every scheduled route must begin AND end at the airline's hub.
+        // Charter missions are exempt — their airframes are based at the mission origin.
+        if (!charter && origin !== airline.headquarters) return false;
         if (destination === origin) return false;
+
+        const assignedType = aircraftType ? findAircraftById(aircraftType) : undefined;
+        // Business-model gate: a model may only fly its allowed aircraft categories
+        // (the charter model flies business jets / turboprops / regional jets).
+        if (assignedType && !isAircraftAllowedForModel(airline.businessModel, assignedType)) return false;
+
+        // --- Charter mission: point-to-point call-out. No hub loop, no intermediate stops,
+        // no weekly timetable and no player fare markup (the charterer names the fare).
+        // Demand and economics come from the charter* helpers in utils/routeEngine.ts.
+        if (charter) {
+          if (stops.length > 0) return false; // missions are point-to-point by definition
+          const baseAirport = AIRPORT_DATABASE.find((a) => a.iata === origin);
+          const missionAirport = AIRPORT_DATABASE.find((a) => a.iata === destination);
+          if (!baseAirport || !missionAirport) return false;
+          // The revenue leg plus the passenger-free return leg must both fit the airframe.
+          if (assignedType && !checkLoopRange(assignedType, [baseAirport, missionAirport]).feasible) return false;
+
+          // Missions are booked per trip: offer only the schedules this airframe can physically
+          // fly on this pair (see CHARTER_TRIP_OPTIONS) and snap the request down to the
+          // nearest option at or below it, so the UI and the store agree on the same values.
+          const tripOptions = buildCharterTripOptions(baseAirport, missionAirport, assignedType);
+          const requested =
+            typeof frequencyPerWeek === 'number' && frequencyPerWeek >= 1 ? Math.floor(frequencyPerWeek) : 1;
+          let trips = Math.min(requested, maxCharterFrequencyPerWeek(baseAirport, missionAirport, assignedType));
+          const nearestOption = tripOptions.filter((o) => o.value <= trips).pop();
+          if (nearestOption) trips = nearestOption.value;
+
+          const missionRoute: Route = {
+            id: generateId('route'),
+            origin,
+            destination,
+            isActive: true,
+            frequency: trips,
+            aircraftId: aircraftType ?? '',
+            schedule: [],
+            avgLoadFactor: 0,
+            revenue: 0,
+            cost: 0,
+            profitability: 0,
+            // The mission leg itself — the empty return is modelled by the charter economics.
+            distanceNm: calculateRouteDistanceNm(baseAirport, missionAirport),
+            // Full mission cycle: revenue leg + turnarounds + empty return to the base.
+            flightTimeMin: assignedType ? charterCycleMinutes(baseAirport, missionAirport, assignedType) : undefined,
+            demandScore: scoreCharterDemand(baseAirport, missionAirport, airline.businessModel),
+            operationType: 'charter',
+          };
+
+          set({
+            airline: {
+              ...airline,
+              routes: [...airline.routes, missionRoute],
+            },
+          });
+
+          // The mission needs airframes at its own base → re-dispatch and refresh the plan.
+          get().dispatchFleet();
+
+          return true;
+        }
 
         // Resolve the full loop path: HUB → stops… → destination → back to HUB.
         const pathIatas = getRoutePath({ origin, stops, destination });
@@ -1074,7 +1143,6 @@ export const useGameStore = create<GameStore>()(
           : calculateRouteDistanceNm(pathAirports[0]!, pathAirports[pathAirports.length - 1]!);
         // Loop demand: average per-leg score (transfer legs between non-hub airports are penalized).
         const demandScore = scoreLoopDemand(pathAirports[0]!, pathAirports as Airport[]);
-        const assignedType = aircraftType ? findAircraftById(aircraftType) : undefined;
 
         // Every leg of the loop must fit within the assigned aircraft's effective range.
         if (assignedType && !checkLoopRange(assignedType, pathAirports as Airport[]).feasible) return false;
@@ -1177,7 +1245,10 @@ export const useGameStore = create<GameStore>()(
           if (feasibilityPath && !checkLoopRange(type, feasibilityPath).feasible) return false;
           // Recompute block time for the new aircraft on this route.
           const pathAirports = resolveRoutePathAirports(next);
-          if (pathAirports && (next.stops?.length ?? 0) > 0) {
+          if (next.operationType === 'charter' && pathAirports) {
+            // Mission cycle: revenue leg + turnarounds + the passenger-free return leg.
+            next.flightTimeMin = charterCycleMinutes(pathAirports[0], pathAirports[1], type);
+          } else if (pathAirports && (next.stops?.length ?? 0) > 0) {
             // Multi-hop loop: full-cycle block time across all legs.
             next.flightTimeMin = getLoopLegs(pathAirports).reduce(
               (sum, [a, b]) => sum + estimateFlightTimeMinutes(calculateRouteDistanceNm(a, b), type),
@@ -1192,7 +1263,10 @@ export const useGameStore = create<GameStore>()(
         const finalType = findAircraftById(next.aircraftId);
         if (finalType) {
           const pathAirports = resolveRoutePathAirports(next);
-          if (pathAirports) {
+          if (next.operationType === 'charter' && pathAirports) {
+            // Missions are booked per trip — the cap is the offered charter schedule.
+            next.frequency = Math.min(next.frequency, maxCharterFrequencyPerWeek(pathAirports[0], pathAirports[1], finalType));
+          } else if (pathAirports) {
             next.frequency = Math.min(next.frequency, maxLoopFrequencyPerWeek(pathAirports, finalType));
           } else if (next.distanceNm) {
             next.frequency = Math.min(next.frequency, maxFrequencyPerWeek(next.distanceNm, finalType));
@@ -1204,15 +1278,17 @@ export const useGameStore = create<GameStore>()(
         }
 
         // Per-route ticket price: clamped to 50%–200% of the model's recommended price.
-        if (fareMultiplier !== undefined) {
+        // Charter missions have no player fare — the charterer names the fare per trip.
+        if (fareMultiplier !== undefined && next.operationType !== 'charter') {
           const m = Number.isFinite(fareMultiplier) ? fareMultiplier : 1;
           next.fareMultiplier = Math.min(2, Math.max(0.5, m));
         }
 
         // Regenerate the weekly timetable when frequency/aircraft changed (or it's missing).
+        // Charter missions are booked per trip and publish no timetable — nothing to refresh.
         const timetablePath = resolveRoutePathAirports(next);
         const timetableType = findAircraftById(next.aircraftId);
-        if (timetablePath && timetableType && needsTimetableRegeneration(next, timetablePath, timetableType)) {
+        if (next.operationType !== 'charter' && timetablePath && timetableType && needsTimetableRegeneration(next, timetablePath, timetableType)) {
           next = {
             ...next,
             timetable: generateTimetable(
@@ -1265,13 +1341,14 @@ export const useGameStore = create<GameStore>()(
         const airline = state.airline;
         if (!airline) return 0;
 
-        const nonCompliant = airline.routes.filter((r) => r.origin !== airline.headquarters);
+        // Charter missions are exempt: their aircraft base is the mission origin, not the hub.
+        const nonCompliant = airline.routes.filter((r) => r.operationType !== 'charter' && r.origin !== airline.headquarters);
         if (nonCompliant.length === 0) return 0;
 
         set({
           airline: {
             ...airline,
-            routes: airline.routes.filter((r) => r.origin === airline.headquarters),
+            routes: airline.routes.filter((r) => r.operationType === 'charter' || r.origin === airline.headquarters),
           },
         });
 
@@ -1372,18 +1449,28 @@ export const useGameStore = create<GameStore>()(
           // Project one week of operations using the route engine's economics model.
           // Load factor ramps up with weeks in service, is reduced by competition and nudged by reputation.
           const weeksSoFar = route.weeksActive ?? 0;
+          // Charter missions price a named fare point-to-point and pay for the empty return
+          // leg — nothing else flies the mission, so competitor pressure doesn't apply (see
+          // utils/routeEngine.ts previewCharterEconomics).
           // Closed hub loop: project every leg of HUB → stops… → DEST → HUB each cycle.
           // Falls back to the legacy point-to-point model if any airport in the path is unknown.
           const pathAirports = resolveRoutePathAirports(route);
-          const economics = pathAirports
-            ? previewLoopEconomics(pathAirports, aircraftType, route.frequency, fuelPricePerKg, {
-                weeksActive: weeksSoFar, // ramp-up based on how long the route has been operating so far
-                competitionShare,
-                reputation: airline.reputation ?? 50,
-                model: airline.businessModel,
-                fareMultiplier: route.fareMultiplier,
-              })
-            : previewRouteEconomics(originAirport, destAirport, aircraftType, route.frequency, fuelPricePerKg, {
+          const economics =
+            route.operationType === 'charter'
+              ? previewCharterEconomics(originAirport, destAirport, aircraftType, route.frequency, fuelPricePerKg, {
+                  weeksActive: weeksSoFar, // new corridors take a few weeks for clients to book
+                  reputation: airline.reputation ?? 50,
+                  model: airline.businessModel,
+                })
+              : pathAirports
+              ? previewLoopEconomics(pathAirports, aircraftType, route.frequency, fuelPricePerKg, {
+                  weeksActive: weeksSoFar, // ramp-up based on how long the route has been operating so far
+                  competitionShare,
+                  reputation: airline.reputation ?? 50,
+                  model: airline.businessModel,
+                  fareMultiplier: route.fareMultiplier,
+                })
+              : previewRouteEconomics(originAirport, destAirport, aircraftType, route.frequency, fuelPricePerKg, {
                 weeksActive: weeksSoFar, // ramp-up based on how long the route has been operating so far
                 competitionShare,
                 reputation: airline.reputation ?? 50,
@@ -1768,6 +1855,8 @@ function regenerateMissingTimetables(): void {
 
   let changed = false;
   const routes = airline.routes.map((route, index) => {
+    // Charter missions are booked per trip and publish no timetable.
+    if (route.operationType === 'charter') return route;
     const type = findAircraftById(route.aircraftId);
     const path = resolveRoutePathAirports(route);
     if (type && path && needsTimetableRegeneration(route, path, type)) {

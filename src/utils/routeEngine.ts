@@ -587,6 +587,176 @@ export function previewLoopEconomics(
 }
 
 // ============================================================
+// Charter / corporate point-to-point missions
+// ------------------------------------------------------------
+// A charter mission is NOT a hub loop: an airframe is positioned to the
+// mission origin, flies ONE revenue leg with passengers, then deadheads
+// (empty) back to its mission base to be ready for the next call-out.
+// `frequency` therefore counts REVENUE trips per week, and the empty leg
+// carries every operating cost (fuel, block time, fees, crew time) but no
+// revenue. Charter traffic is also point-to-point: it does not compete with
+// scheduled airlines for a market share and it decays far more slowly with
+// distance, because business pairs fly direct by definition.
+// ============================================================
+
+/** Weekly cap on missions offered per route — charterers book a limited schedule. */
+export const CHARTER_MAX_TRIPS_PER_WEEK = 14;
+
+/** Mission-frequency options (revenue trips per week) — charters are booked per trip, not per day. */
+export const CHARTER_TRIP_OPTIONS: number[] = [1, 2, 3, 4, 5, 6, 7, 10, 14];
+
+/** Full mission cycle minutes: revenue leg + turnaround + empty return leg + turnaround at base. */
+export function charterCycleMinutes(origin: Airport, destination: Airport, aircraft: AircraftType): number {
+  return getRouteCycleMinutes(calculateRouteDistanceNm(origin, destination), aircraft);
+}
+
+/** Missions per week one airframe can complete on this pair (cycle-time + crew-duty limited). */
+export function maxCharterTripsPerWeek(origin: Airport, destination: Airport, aircraft: AircraftType): number {
+  return 7 * maxCyclesPerDay(calculateRouteDistanceNm(origin, destination), aircraft);
+}
+
+/** Weekly mission cap clamped to the offered options — what the store hard-caps saves at. */
+export function maxCharterFrequencyPerWeek(origin: Airport, destination: Airport, aircraft?: AircraftType): number {
+  if (!aircraft) return CHARTER_TRIP_OPTIONS[CHARTER_TRIP_OPTIONS.length - 1];
+  return Math.min(maxCharterTripsPerWeek(origin, destination, aircraft), CHARTER_TRIP_OPTIONS[CHARTER_TRIP_OPTIONS.length - 1]);
+}
+
+/** Mission-frequency options limited to what this aircraft can physically fly on this pair. */
+export function buildCharterTripOptions(
+  origin: Airport,
+  destination: Airport,
+  aircraft?: AircraftType
+): { value: number; label: string }[] {
+  const cap = aircraft ? maxCharterTripsPerWeek(origin, destination, aircraft) : CHARTER_MAX_TRIPS_PER_WEEK;
+  const options = CHARTER_TRIP_OPTIONS
+    .filter((n) => n <= cap)
+    .map((n) => ({ value: n, label: n === 1 ? '1 mission/wk' : `${n} missions/wk` }));
+  return options.length > 0 ? options : [{ value: 1, label: '1 mission/wk' }];
+}
+
+/**
+ * Charter mission demand (0–100). Corporate traffic needs business traffic at BOTH
+ * ends (the smaller market dominates), and distance decays far more gently than
+ * scheduled traffic because missions are point-to-point by definition.
+ */
+export function scoreCharterDemand(origin: Airport, destination: Airport, model?: BusinessModel): number {
+  const pairPopularity = Math.min(origin.popularity, destination.popularity) / 100;
+  const crossPopularity = ((origin.popularity + destination.popularity) / 2) / 100;
+  const corporateBase = pairPopularity * 0.75 + crossPopularity * 0.25;
+
+  const distanceNm = calculateRouteDistanceNm(origin, destination);
+  const distanceFactor = 1 / (1 + (distanceNm / 5000) ** 2);
+
+  const factor = getBusinessModelConfig(model).charterDemandFactor ?? 1;
+  return Math.round(Math.min(1, Math.max(0, corporateBase * distanceFactor * factor)) * 100);
+}
+
+export interface CharterMission {
+  airport: Airport;
+  distanceNm: number;
+  demandScore: number;
+}
+
+/** All airports within this aircraft's range of `origin`, best charter missions first. */
+export function findCharterMissions(
+  origin: Airport,
+  aircraft: AircraftType,
+  allAirports: Airport[],
+  maxResults = 50,
+  model?: BusinessModel
+): CharterMission[] {
+  const effective = getEffectiveRangeNm(aircraft);
+  const results: CharterMission[] = [];
+  for (const dest of allAirports) {
+    if (dest.iata === origin.iata) continue;
+    const distanceNm = calculateRouteDistanceNm(origin, dest);
+    if (distanceNm > effective) continue;
+    results.push({ airport: dest, distanceNm, demandScore: scoreCharterDemand(origin, dest, model) });
+  }
+  results.sort((a, b) => b.demandScore - a.demandScore);
+  return results.slice(0, maxResults);
+}
+
+/** Top N charter mission suggestions from `origin` for this aircraft type. */
+export function suggestCharterMissions(
+  origin: Airport,
+  aircraft: AircraftType,
+  allAirports: Airport[],
+  count = 6,
+  model?: BusinessModel
+): CharterMission[] {
+  return findCharterMissions(origin, aircraft, allAirports, count, model);
+}
+
+/**
+ * Share (0–1) of a charter mission's operating cost that belongs to the EMPTY
+ * repositioning leg — used by the finance insights to report the deadhead cost
+ * as its own category instead of hiding it inside crew costs.
+ */
+export function charterDeadheadCostShare(model?: BusinessModel): number {
+  const factor = getBusinessModelConfig(model).deadheadCostFactor ?? 1;
+  if (factor <= 0) return 0;
+  return factor / (1 + factor);
+}
+
+/**
+ * Weekly economics for a charter mission pair. One scheduled unit = one revenue
+ * leg with passengers PLUS one empty leg back to the mission base, so costs are
+ * charged for both legs while passengers and ticket revenue come from one only.
+ * Charter missions have no player-set fare (the charterer names the fare) and no
+ * competitor market share (nothing else flies the mission).
+ */
+export function previewCharterEconomics(
+  origin: Airport,
+  destination: Airport,
+  aircraft: AircraftType,
+  tripsPerWeek: number,
+  fuelPricePerKg: number = DEFAULT_FUEL_PRICE_PER_KG,
+  options: RouteEconomicsOptions = {}
+): RouteEconomicsPreview {
+  const model = getBusinessModelConfig(options.model);
+  const distanceNm = calculateRouteDistanceNm(origin, destination);
+  const seatsPerFlight = aircraft.maxPassengers;
+
+  // --- Mission load factor ---
+  const demand = scoreCharterDemand(origin, destination, options.model) / 100;
+  // Missions are booked whole, so they fly fuller than a scheduled flight on the same pair.
+  const ceilingLoadFactor = 0.45 + demand * 0.5;
+  // New corridors take a few weeks for clients to start booking them.
+  const weeksActive = Math.max(0, options.weeksActive ?? 0);
+  const rampFactor = 0.6 + 0.4 * (1 - Math.exp(-weeksActive / 4));
+  const reputation = options.reputation ?? 50;
+
+  let estLoadFactor = ceilingLoadFactor * rampFactor;
+  estLoadFactor *= 1 + ((reputation - 50) / 50) * 0.1;
+  estLoadFactor *= model.loadFactorModifier;
+  estLoadFactor = Math.min(0.98, Math.max(0.1, estLoadFactor));
+
+  // The charterer's fare: the model-scaled recommendation for this pair (no player ratio).
+  const ticketPrice = Math.max(1, Math.round(estimateTicketPrice(distanceNm, options.model)));
+
+  const weeklyPassengers = Math.round(seatsPerFlight * estLoadFactor * tripsPerWeek);
+  const weeklyOnboardRevenue = Math.round(weeklyPassengers * model.onboardRevenuePerPax);
+  const weeklyRevenue = Math.round(weeklyPassengers * ticketPrice) + weeklyOnboardRevenue;
+
+  // --- Costs: BOTH legs (block time is what the airframe actually flies) ---
+  const legBlockHr = distanceNm / Math.max(aircraft.cruiseSpeed - 40, 120);
+  const deadheadFactor = model.deadheadCostFactor ?? 1;
+  const blockTimeHr = legBlockHr * (1 + deadheadFactor);
+  const hourlyCrewAndOther = Math.max(400, aircraft.maxPassengers * 3) * model.hourlyCostModifier;
+  const weeklyFuelCost = Math.round(aircraft.fuelBurnPerHour * fuelPricePerKg * blockTimeHr * tripsPerWeek);
+  // Blended landing/handling fees at BOTH airports once per rotation (same formula as a
+  // direct point-to-point loop, so the finance split lines up with the settlement).
+  const airportFees = (origin.landingFee + destination.landingFee) * tripsPerWeek * 0.15;
+  const weeklyCosts = Math.round(
+    (aircraft.fuelBurnPerHour * fuelPricePerKg + hourlyCrewAndOther) * blockTimeHr * tripsPerWeek + airportFees
+  );
+  const weeklyProfit = weeklyRevenue - weeklyCosts;
+
+  return { estLoadFactor, ticketPrice, weeklyPassengers, weeklyRevenue, weeklyOnboardRevenue, weeklyCosts, weeklyFuelCost, weeklyProfit };
+}
+
+// ============================================================
 // Fleet compatibility helpers
 // ============================================================
 

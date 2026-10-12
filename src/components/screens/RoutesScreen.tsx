@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useGameStore } from '@store/gameStore';
-import type { Route, AircraftType, Airport, Aircraft } from '@/types/game';
+import type { Route, AircraftType, Airport, Aircraft, StaffMember } from '@/types/game';
 import { getAirportByIata, AIRPORT_DATABASE } from '@data/airports';
 import { AIRCRAFT_DATABASE } from '@data/aircraft';
 import { formatCurrency, formatPercentage } from '@utils/helpers';
@@ -23,7 +23,19 @@ import {
   previewLoopEconomics,
   maxLoopCyclesPerDay,
   getLoopCycleMinutes,
+  buildCharterTripOptions,
+  previewCharterEconomics,
+  suggestCharterMissions,
+  charterCycleMinutes,
+  maxCharterFrequencyPerWeek,
+  charterDeadheadCostShare,
 } from '@/utils/routeEngine';
+import {
+  getAircraftCrewRequirements,
+  computeStaffingStatus,
+  computeTypeCrewRequirements,
+} from '@/utils/crewDispatcher';
+import { isAircraftAllowedForModel } from '@/utils/businessModels';
 import { getRequiredAircraftCount, getPoolStats, getRouteStaffing } from '@/utils/fleetDispatcher';
 import { formatMinutes } from '@/utils/timetable';
 import { useUnits, formatDistanceNm } from '@/utils/units';
@@ -101,9 +113,19 @@ export function RoutesScreen() {
   const [frequency, setFrequency] = useState(7);
   const [fareMultiplier, setFareMultiplier] = useState(1);
 
+  // Charter business model: point-to-point missions from any mission base (no hub loop,
+  // no fare markup) — see utils/routeEngine.ts.
+  const [showCharterModal, setShowCharterModal] = useState(false);
+  const [charterBase, setCharterBase] = useState('');
+  const [charterDestination, setCharterDestination] = useState('');
+  const [charterTypeId, setCharterTypeId] = useState('');
+  const [charterFrequency, setCharterFrequency] = useState(1);
+
   if (!airline) return null;
 
   const ownedTypeIds = new Set(airline.fleet.map((a) => a.typeId));
+  const businessModel = airline.businessModel ?? 'regional';
+  const isCharterModel = businessModel === 'charter';
 
   const handleCreateRoute = () => {
     if (!destination || destination === hubIata) {
@@ -143,6 +165,35 @@ export function RoutesScreen() {
     }
   };
 
+  const handleCreateCharterMission = () => {
+    const created = createRoute({
+      origin: charterBase,
+      destination: charterDestination,
+      aircraftType: charterTypeId,
+      frequencyPerWeek: charterFrequency,
+      charter: true,
+    });
+
+    if (created) {
+      addNotification({
+        type: 'success',
+        title: 'Charter Mission Created',
+        message: `Mission ${charterBase} ⇄ ${charterDestination} is now scheduled - aircraft base at ${charterBase}.`,
+      });
+      setShowCharterModal(false);
+      setCharterBase('');
+      setCharterDestination('');
+      setCharterTypeId('');
+      setCharterFrequency(1);
+    } else {
+      addNotification({
+        type: 'error',
+        title: 'Invalid Mission',
+        message: 'Could not create the mission. Check the airports, the aircraft range and the trip schedule.',
+      });
+    }
+  };
+
   const selectedRoute = airline.routes.find((r) => r.id === selectedRouteId) ?? null;
 
   return (
@@ -156,6 +207,12 @@ export function RoutesScreen() {
           <Plus className="w-4 h-4" />
           Create Route
         </button>
+        {isCharterModel && (
+          <button onClick={() => setShowCharterModal(true)} className="btn-primary flex items-center gap-2">
+            <Repeat className="w-4 h-4" />
+            Charter Mission
+          </button>
+        )}
       </div>
 
       {airline.routes.length > 0 && (
@@ -193,6 +250,7 @@ export function RoutesScreen() {
             const routeType = AIRCRAFT_DATABASE.find((t) => t.id === route.aircraftId);
             const staffedCount = getRouteStaffing(airline.fleet, route.id);
             const requiredCount = getRequiredAircraftCount(resolvePathAirports(pathIatas), routeType, route.frequency);
+            const isCharterRoute = route.operationType === 'charter';
             return (
               <div
                 key={route.id}
@@ -210,7 +268,9 @@ export function RoutesScreen() {
                         {pathIatas.join(' → ')}
                       </p>
                       <p className="text-xs text-runway-400">
-                        Hub loop · {stopCount > 0 ? `${stopCount} intermediate stop${stopCount > 1 ? 's' : ''}` : 'direct'} · returns to {route.origin}
+                        {isCharterRoute
+                          ? `Charter mission · point-to-point · aircraft base ${route.origin}`
+                          : `Hub loop · ${stopCount > 0 ? `${stopCount} intermediate stop${stopCount > 1 ? 's' : ''}` : 'direct'} · returns to {route.origin}`}
                       </p>
                     </div>
                   </div>
@@ -234,16 +294,18 @@ export function RoutesScreen() {
                     <StatusPill tone={route.isActive ? 'green' : 'red'}>
                       {route.isActive ? 'Active' : 'Inactive'}
                     </StatusPill>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigateTo('timetable');
-                      }}
-                      className="p-1.5 rounded-lg bg-white/3 border border-white/10 text-runway-400 hover:text-sky-300 hover:border-white/25 transition-colors"
-                      title="View weekly timetable"
-                    >
-                      <CalendarClock className="w-3.5 h-3.5" />
-                    </button>
+                    {!isCharterRoute && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigateTo('timetable');
+                        }}
+                        className="p-1.5 rounded-lg bg-white/3 border border-white/10 text-runway-400 hover:text-sky-300 hover:border-white/25 transition-colors"
+                        title="View weekly timetable"
+                      >
+                        <CalendarClock className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -273,14 +335,19 @@ export function RoutesScreen() {
                       </span>
                     </span>
                   ))}
-                  <span className="w-6 h-px bg-linear-to-r from-sky-500/60 to-sky-400/60" />
-                  <span
-                    title={`Returns to hub ${route.origin}`}
+                  {!isCharterRoute && (
+                    <>
+                      <span className="w-6 h-px bg-linear-to-r from-sky-500/60 to-sky-400/60" />
+                      <span
+                        title={`Returns to hub ${route.origin}`}
                     className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-bold bg-sky-500/10 border border-sky-500/30 text-sky-300"
                   >
-                    <Repeat className="w-3.5 h-3.5" />
-                    {route.origin}
-                  </span>
+                          <Repeat className="w-3.5 h-3.5" />
+                          {route.origin}
+                        </span>
+                      </>
+                    )
+                  }
                   <span className="text-xs text-runway-400 flex-1 truncate ml-2">
                     {distanceNm > 0 ? `${formatDistanceNm(distanceNm, units)} loop` : ''}
                     {route.flightTimeMin ? ` · ${formatFlightTime(route.flightTimeMin)}` : ''}
@@ -370,6 +437,54 @@ export function RoutesScreen() {
                 fareMultiplier={fareMultiplier}
                 onFareMultiplierChange={setFareMultiplier}
                 onCreate={handleCreateRoute}
+              />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showCharterModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm"
+            onClick={() => setShowCharterModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="glass-panel w-full max-w-2xl max-h-[85vh] overflow-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between p-6 border-b border-white/5">
+                <h2 className="text-xl font-bold text-white">New Charter Mission</h2>
+                <button onClick={() => setShowCharterModal(false)} className="text-runway-400 hover:text-white">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <CharterMissionForm
+                baseIata={charterBase}
+                destination={charterDestination}
+                aircraftTypeId={charterTypeId}
+                tripsPerWeek={charterFrequency}
+                ownedTypeIds={ownedTypeIds}
+                fleet={airline.fleet}
+                routes={airline.routes}
+                staff={airline.staff}
+                currencyFormat={currencyFormat}
+                onBaseChange={(iata) => {
+                  setCharterBase(iata);
+                  // Keep the pair valid: the mission can't be the base itself.
+                  if (iata === charterDestination) setCharterDestination('');
+                }}
+                onDestinationChange={setCharterDestination}
+                onAircraftTypeChange={setCharterTypeId}
+                onTripsChange={setCharterFrequency}
+                onCreate={handleCreateCharterMission}
               />
             </motion.div>
           </motion.div>
@@ -806,6 +921,398 @@ function RouteCreationForm({
       <div className="flex items-center justify-end gap-3 pt-4 border-t border-white/5">
         <button onClick={onCreate} disabled={!destination || (rangeCheck !== null && !rangeCheck.feasible)} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
           Create Route
+        </button>
+      </div>
+    </div>
+  );
+}
+
+interface CharterMissionFormProps {
+  baseIata: string;
+  destination: string;
+  aircraftTypeId: string;
+  tripsPerWeek: number;
+  ownedTypeIds: Set<string>;
+  /** Full fleet — used for the live pool-availability check at the mission base. */
+  fleet: Aircraft[];
+  /** Existing network + rosters — the mission's crew demand is measured against them. */
+  routes: Route[];
+  staff: StaffMember[];
+  currencyFormat: 'USD' | 'EUR' | 'GBP';
+  onBaseChange: (iata: string) => void;
+  onDestinationChange: (iata: string) => void;
+  onAircraftTypeChange: (id: string) => void;
+  onTripsChange: (trips: number) => void;
+  onCreate: () => void;
+}
+
+/**
+ * Charter mission form — point-to-point call-out from an aircraft base.
+ * ---------------------------------------------------------------
+ * Mirrors RouteCreationForm but for the charter business model: instead of a
+ * closed hub loop there is one revenue leg (base → mission) plus a passenger-free
+ * return, so the schedule is booked per trip (CHARTER_TRIP_OPTIONS) rather than
+ * per day, no intermediate stops are offered, no weekly timetable is published,
+ * and the player sets no fare markup — the charterer names the fare, which the
+ * economics card reports as a per-passenger charter fare.
+ */
+function CharterMissionForm({
+  baseIata,
+  destination,
+  aircraftTypeId,
+  tripsPerWeek,
+  ownedTypeIds,
+  fleet,
+  routes,
+  staff,
+  currencyFormat,
+  onBaseChange,
+  onDestinationChange,
+  onAircraftTypeChange,
+  onTripsChange,
+  onCreate,
+}: CharterMissionFormProps) {
+  const [suggestionIata, setSuggestionIata] = useState<string | null>(null);
+  // Live market fuel price — mission costs track the dynamic fuel market.
+  const fuelPricePerKg = useGameStore((state) => state.world.fuelPrice);
+  const businessModel = useGameStore((state) => state.airline?.businessModel);
+  const units = useUnits();
+
+  const baseAirport = useMemo(() => (baseIata ? getAirportByIata(baseIata) : undefined), [baseIata]);
+  const missionAirport = useMemo(() => (destination ? getAirportByIata(destination) : undefined), [destination]);
+  const aircraftType = useMemo(
+    () => AIRCRAFT_DATABASE.find((t) => t.id === aircraftTypeId),
+    [aircraftTypeId]
+  );
+
+  // The mission pair IS the operation: revenue leg out, empty leg back to the base.
+  // Range only has to hold for the leg itself — the return is the same distance.
+  const missionPair = baseAirport && missionAirport ? [baseAirport, missionAirport] : null;
+  const rangeCheck = aircraftType && missionPair ? checkLoopRange(aircraftType, missionPair) : null;
+  const missionDistanceNm = missionPair ? calculateRouteDistanceNm(missionPair[0]!, missionPair[1]!) : null;
+  const missionCycleMin =
+    aircraftType && missionPair ? charterCycleMinutes(missionPair[0]!, missionPair[1]!, aircraftType) : null;
+
+  // Bookable mission schedules for this airframe on this pair (see routeEngine).
+  const tripOptions = useMemo(() => {
+    if (!baseAirport || !missionAirport) return [] as { value: number; label: string }[];
+    return buildCharterTripOptions(baseAirport, missionAirport, aircraftType);
+  }, [baseAirport, missionAirport, aircraftType]);
+
+  // Auto-clamp a picked schedule this airframe physically cannot fly.
+  useEffect(() => {
+    if (!baseAirport || !missionAirport || !aircraftType) return;
+    const maxTrips = maxCharterFrequencyPerWeek(baseAirport, missionAirport, aircraftType);
+    if (tripsPerWeek > maxTrips) onTripsChange(maxTrips);
+  }, [baseAirport, missionAirport, aircraftType, tripsPerWeek, onTripsChange]);
+
+  const economics = useMemo(() => {
+    if (!baseAirport || !missionAirport || !aircraftType) return null;
+    return previewCharterEconomics(baseAirport, missionAirport, aircraftType, tripsPerWeek, fuelPricePerKg, {
+      model: businessModel,
+    });
+  }, [baseAirport, missionAirport, aircraftType, tripsPerWeek, fuelPricePerKg, businessModel]);
+
+  // Crew demand for this schedule. Charter missions are private flights, so the
+  // crew engine (utils/crewDispatcher) is asked with charterOnly = true: one
+  // captain + one first officer per airframe and NO purser or cabin crew.
+  const missionCrew = useMemo(
+    () => (aircraftType ? getAircraftCrewRequirements(aircraftTypeId, true) : null),
+    [aircraftType, aircraftTypeId]
+  );
+  const crewDemand = useMemo(() => {
+    if (!aircraftType || !missionPair || !missionDistanceNm) return null;
+    // What this type would have to man once the mission is scheduled — the same
+    // workload-sized rotation-set maths the weekly settlement and StaffScreen use.
+    const prospective: Route = {
+      id: 'charter-mission-preview',
+      origin: baseIata,
+      destination,
+      isActive: true,
+      frequency: tripsPerWeek,
+      aircraftId: aircraftTypeId,
+      schedule: [],
+      avgLoadFactor: 0,
+      revenue: 0,
+      cost: 0,
+      profitability: 0,
+      distanceNm: missionDistanceNm,
+      operationType: 'charter',
+    };
+    const req = computeTypeCrewRequirements([...routes, prospective])[aircraftTypeId];
+    if (!req) return null;
+    const pilots = computeStaffingStatus([...routes, prospective], staff, fleet).find((d) => d.key === 'pilots');
+    const rated = pilots?.pilotBreakdown?.find((b) => b.typeId === aircraftTypeId);
+    return { req, rated, typeName: aircraftType.name, missing: pilots?.missing ?? 0 };
+  }, [aircraftType, missionPair, missionDistanceNm, baseIata, destination, aircraftTypeId, tripsPerWeek, routes, staff, fleet]);
+
+  const suggestions = useMemo(() => {
+    if (!baseAirport || !aircraftType) return [];
+    return suggestCharterMissions(baseAirport, aircraftType, AIRPORT_DATABASE, 6, businessModel);
+  }, [baseAirport, aircraftType, businessModel]);
+
+  // An airport already picked as the base (or the mission) can't be picked again.
+  const usedIatas = [baseIata, destination].filter(Boolean);
+  // The charter model only flies mission-capable airframes (business jets, turboprops,
+  // regional jets) — the same gate the store applies on create (utils/businessModels.ts).
+  const flyableTypeIds = AIRCRAFT_DATABASE
+    .filter((t) => ownedTypeIds.has(t.id) && isAircraftAllowedForModel(businessModel, t))
+    .map((t) => t.id);
+
+  return (
+    <div className="p-6 space-y-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="text-xs font-medium text-runway-300 mb-1.5 block">Charter Base (where the airframes stand)</label>
+          <AirportPicker label="Charter base" value={baseIata || null} onChange={onBaseChange} excludeIatas={usedIatas} />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-runway-300 mb-1.5 block">Mission Destination</label>
+          <AirportPicker label="Mission destination" value={destination || null} onChange={onDestinationChange} excludeIatas={usedIatas} />
+        </div>
+      </div>
+
+      <p className="text-xs text-runway-400">
+        Missions are point-to-point — no intermediate stops, no weekly timetable and no ticket markup: the
+        charterer names the fare, so the schedule is booked per trip.
+      </p>
+
+      {missionDistanceNm !== null && (
+        <div className="flex items-center gap-3 text-sm">
+          <span className="text-runway-400">Mission leg:</span>
+          <span className="font-semibold text-white">{formatDistanceNm(missionDistanceNm, units)}</span>
+          {missionCycleMin !== null && (
+            <>
+              <span className="text-runway-500">·</span>
+              <span className="text-runway-300">
+                Full cycle incl. the empty return ≈ {formatMinutes(missionCycleMin)} block time
+              </span>
+            </>
+          )}
+        </div>
+      )}
+
+      <div>
+        <label className="text-xs font-medium text-runway-300 mb-1.5 block">Aircraft Type</label>
+        <select value={aircraftTypeId} onChange={(e) => onAircraftTypeChange(e.target.value)} className="input-field w-full">
+          <option value="">— Select aircraft type —</option>
+          {flyableTypeIds.map((id) => {
+            const t = AIRCRAFT_DATABASE.find((a) => a.id === id)!;
+            return (
+              <option key={id} value={id}>
+                {t.name} ({t.maxPassengers} seats)
+              </option>
+            );
+          })}
+        </select>
+
+        {ownedTypeIds.size === 0 && (
+          <p className="mt-2 text-xs text-runway-400">You don't own any aircraft yet. Purchase one in the Fleet screen first.</p>
+        )}
+        {ownedTypeIds.size > 0 && flyableTypeIds.length === 0 && (
+          <p className="mt-2 text-xs text-amber-300">
+            None of your aircraft can fly charter missions — this business model needs mission-capable airframes
+            (business jets, turboprops or regional jets).
+          </p>
+        )}
+
+        {aircraftType && missionPair && rangeCheck && (
+          <div className="mt-3 rounded-lg bg-white/3 border border-white/5 p-3">
+            <div className="flex items-center gap-2 text-sm mb-2 flex-wrap">
+              {rangeCheck.feasible ? (
+                <>
+                  <CheckCircle2 className="w-4 h-4 text-green-400" />
+                  <span className="text-green-400 font-medium">Mission leg within range</span>
+                </>
+              ) : (
+                <>
+                  <AlertTriangle className="w-4 h-4 text-red-400" />
+                  <span className="text-red-400 font-medium">Mission leg out of range</span>
+                </>
+              )}
+              <span className="text-runway-500 text-xs ml-auto">
+                {formatDistanceNm(rangeCheck.totalDistanceNm, units)} mission ·{' '}
+                {formatDistanceNm(getEffectiveRangeNm(aircraftType), units)} usable per leg
+              </span>
+            </div>
+            <div className="space-y-1">
+              {rangeCheck.legs.map((leg) => (
+                <div key={`${leg.from}-${leg.to}`} className="flex items-center gap-2 text-xs">
+                  {leg.feasible ? (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-green-400" />
+                  ) : (
+                    <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+                  )}
+                  <span className={leg.feasible ? 'text-runway-300' : 'text-red-400'}>
+                    {leg.from} → {leg.to} · {formatDistanceNm(leg.distanceNm, units)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {tripOptions.length > 0 && (
+          <div className="mt-2 rounded-lg bg-white/3 border border-white/5 p-3">
+            <p className="text-xs font-medium text-runway-300 mb-1.5">Bookable mission schedules</p>
+            <p className="text-xs text-runway-300">
+              {tripOptions.map((o) => o.value).join(' · ')} missions/wk — one airframe can fly{' '}
+              {Math.floor(10080 / (missionCycleMin ?? 1))} mission cycles per week, so busier schedules need more
+              airframes at the base.
+            </p>
+          </div>
+        )}
+
+        {aircraftType && missionPair && rangeCheck?.feasible && (() => {
+          const stats = getPoolStats(fleet, aircraftTypeId);
+          const requiredCount = getRequiredAircraftCount(missionPair, aircraftType, tripsPerWeek);
+          if (requiredCount === 0) return null;
+          const enough = stats.usable >= requiredCount;
+          return (
+            <div className={`mt-2 flex items-start gap-2 text-sm ${enough ? '' : 'text-amber-400'}`}>
+              {enough ? (
+                <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0 mt-0.5" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              )}
+              <span className={enough ? 'text-runway-300' : 'text-amber-300'}>
+                Mission check: this schedule needs {requiredCount}× {aircraftType.name} standing at{' '}
+                {baseAirport?.name ?? baseIata} — the operator has {stats.usable} usable ({stats.free} free ·{' '}
+                {stats.deployed} deployed).
+                {enough ? '' : ` Missions are booked per trip, so a shortfall means the schedule cannot be flown as offered.`}
+              </span>
+            </div>
+          );
+        })()}
+
+        {/* Crew check: private flights are crewed by two pilots — no cabin crew */}
+        {(() => {
+          if (!missionCrew || !crewDemand) return null;
+          const { req, rated, typeName, missing } = crewDemand;
+          const perAirframe = missionCrew.captain + missionCrew.firstOfficer;
+          const hired = (rated?.ratedCaptains ?? 0) + (rated?.ratedFirstOfficers ?? 0);
+          const stillToHire = (rated?.missingCaptains ?? 0) + (rated?.missingFirstOfficers ?? 0);
+          const ok = stillToHire === 0 && missing === 0;
+          return (
+            <div className={`mt-2 flex items-start gap-2 text-sm ${ok ? '' : 'text-amber-400'}`}>
+              {ok ? (
+                <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0 mt-0.5" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              )}
+              <span className={ok ? 'text-runway-300' : 'text-amber-300'}>
+                Crew check: missions are private flights — {perAirframe} pilots per airframe{' '}
+                ({missionCrew.captain} captain + {missionCrew.firstOfficer} first officer),{' '}
+                and no purser or cabin crew. This schedule needs {req.sets} rotating crew set(s),{' '}
+                i.e. {req.captain} captains + {req.firstOfficer} first officers; {hired} of your{' '}
+                pilots are rated for the {typeName}.{' '}
+                {stillToHire === 0 ? 'Rosters cover it.' : `Hire ${stillToHire} more.`}{' '}
+                {missing === 0 ? '' : `The pilot department is still ${missing} short overall.`}
+              </span>
+            </div>
+          );
+        })()}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="text-xs font-medium text-runway-300 mb-1.5 block">Missions per week</label>
+          <select value={tripsPerWeek} onChange={(e) => onTripsChange(Number(e.target.value))} className="input-field w-full">
+            {tripOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {economics && (
+          <div className="rounded-lg bg-white/3 border border-white/5 p-3">
+            <p className="text-xs font-medium text-runway-300 mb-2">Charter Mission Economics</p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+              <span className="text-runway-400">Est. load factor</span>
+              <span className="font-medium text-sky-400">{formatPercentage(economics.estLoadFactor)}</span>
+              <span className="text-runway-400">Missions / week</span>
+              <span className="font-medium text-white">{tripsPerWeek}</span>
+              <span className="text-runway-400">Charter fare</span>
+              <span className="font-medium text-white" title="Fare the charterer names for the whole mission, per passenger">
+                {formatCurrency(economics.ticketPrice, currencyFormat)}
+              </span>
+              <span className="text-runway-400">Weekly passengers</span>
+              <span className="font-medium text-white">{economics.weeklyPassengers} pax</span>
+              <span className="text-runway-400">Weekly revenue</span>
+              <span className="font-medium text-white">{formatCurrency(economics.weeklyRevenue, currencyFormat)}</span>
+              <span className="text-runway-400">Weekly operating cost</span>
+              <span className="font-medium text-amber-400" title="Block time for the revenue leg plus the empty return to the charter base, incl. fuel, crew and handling">
+                {formatCurrency(economics.weeklyCosts, currencyFormat)}
+              </span>
+              <span className="text-runway-400">Empty-leg cost share</span>
+              <span className="font-medium text-white" title="Share of the block-time operating cost carried by the passenger-free repositioning leg back to the mission base — the charter model charges it at full cost">
+                {formatPercentage(charterDeadheadCostShare(businessModel), 0)}
+              </span>
+              <span className="text-runway-400">Weekly fuel cost</span>
+              <span className="font-medium text-amber-400" title={`At the current market price of $${fuelPricePerKg.toFixed(2)}/kg`}>
+                {formatCurrency(economics.weeklyFuelCost, currencyFormat)}
+              </span>
+              <span className="text-runway-400">Weekly P&L</span>
+              <span className={`font-medium ${economics.weeklyProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {formatCurrency(economics.weeklyProfit, currencyFormat)}
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+
+
+      {suggestions.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-runway-300 mb-2 flex items-center gap-1.5">
+            <Lightbulb className="w-3.5 h-3.5 text-yellow-400" />
+            Best charter missions from {baseIata} — within range
+          </p>
+          <div className="flex flex-wrap gap-2 max-h-36 overflow-auto pr-1">
+            {suggestions.map((s) => {
+              const isSelected = suggestionIata === s.airport.iata;
+              return (
+                <button
+                  key={s.airport.iata}
+                  onClick={() => setSuggestionIata(isSelected ? null : s.airport.iata)}
+                  onDoubleClick={() => onDestinationChange(s.airport.iata)}
+                  className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${
+                    isSelected
+                      ? 'bg-sky-500/20 border-sky-400/50 text-white'
+                      : 'bg-white/3 border-white/10 text-runway-300 hover:border-white/25 hover:text-white'
+                  }`}
+                >
+                  <span className="font-semibold">{s.airport.iata}</span>
+                  <span className="text-runway-400"> · {s.airport.city}</span>
+                  <span className="text-runway-500"> · {formatDistanceNm(s.distanceNm, units)}</span>
+                  <span className="text-sky-400"> · demand {s.demandScore}</span>
+                </button>
+              );
+            })}
+          </div>
+          {suggestionIata && (
+            <button onClick={() => onDestinationChange(suggestionIata)} className="btn-secondary mt-2 text-xs px-3 py-1.5">
+              Use {suggestionIata} as mission destination
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="flex items-center justify-end gap-3 pt-4 border-t border-white/5">
+        <button
+          onClick={onCreate}
+          disabled={
+            !baseIata ||
+            !destination ||
+            !aircraftTypeId ||
+            (rangeCheck !== null && !rangeCheck.feasible) ||
+            !tripOptions.some((o) => o.value === tripsPerWeek)
+          }
+          className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Create charter mission
         </button>
       </div>
     </div>

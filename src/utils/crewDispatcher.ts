@@ -14,6 +14,10 @@
 // shortfall becomes a maintenance penalty applied by gameStore. Mirrors the
 // structure of utils/fleetDispatcher.ts: sticky assignments, one pass over a
 // free pool, no state mutation here.
+//
+// Charter missions (route.operationType === 'charter') are the exception: they
+// are private flights crewed by two pilots only, so a type whose active routes
+// are all charters requires no purser or cabin crew.
 // ============================================================
 
 import type { Aircraft, Route, StaffMember } from '@/types/game';
@@ -25,8 +29,27 @@ import { crewSetsRequired, isOnMandatoryRest } from './crewRegulations';
 /** Roles that require a matching pilot type rating (unrated pilots are assignable, rated ones must match). */
 const RATED_ROLES: StaffMember['role'][] = ['captain', 'first-officer'];
 
-/** Crew needed per airframe of a given type (cabin crew scales with size). */
-export function getAircraftCrewRequirements(typeId: string): {
+/**
+ * Aircraft types whose ONLY active routes are charter missions. A charter mission
+ * is a private flight: the airframe is flown by a two-pilot crew with no cabin
+ * service on board, so those types need no purser or cabin crew.
+ */
+export function getCharterOnlyTypeIds(routes: Route[]): Set<string> {
+  const charterTypes = new Set<string>();
+  const scheduledTypes = new Set<string>();
+  for (const route of routes) {
+    if (!route.isActive || !route.aircraftId) continue;
+    (route.operationType === 'charter' ? charterTypes : scheduledTypes).add(route.aircraftId);
+  }
+  const charterOnly = new Set<string>();
+  for (const typeId of charterTypes) {
+    if (!scheduledTypes.has(typeId)) charterOnly.add(typeId);
+  }
+  return charterOnly;
+}
+
+/** Crew needed per airframe of a given type (cabin crew scales with size; charter missions fly without cabin crew). */
+export function getAircraftCrewRequirements(typeId: string, charterOnly = false): {
   captain: number;
   firstOfficer: number;
   cabinCrew: number;
@@ -34,11 +57,12 @@ export function getAircraftCrewRequirements(typeId: string): {
 } | null {
   const type = AIRCRAFT_DATABASE.find((t) => t.id === typeId);
   if (!type) return null;
+  const noCabinService = charterOnly || type.category === 'cargo';
   return {
     captain: 1,
     firstOfficer: 1,
-    purser: type.category === 'cargo' ? 0 : 1,
-    cabinCrew: type.category === 'cargo' ? 0 : Math.ceil(type.maxPassengers / 50),
+    purser: noCabinService ? 0 : 1,
+    cabinCrew: noCabinService ? 0 : Math.ceil(type.maxPassengers / 50),
   };
 }
 
@@ -50,7 +74,9 @@ export function getRequiredEngineerCount(fleet: Aircraft[]): number {
 /**
  * Weekly CYCLE-hour workload per aircraft type across all active routes
  * (same full-loop model as the weekly settlement: every leg + turnaround at
- * each visited airport, × cycles per week).
+ * each visited airport, × cycles per week). Charter missions use the same
+ * maths: their path is [base, destination], so the loop is exactly the revenue
+ * leg plus the empty return leg plus a turnaround at each end.
  */
 export function typeWeeklyCycleHours(routes: Route[]): Map<string, number> {
   const byType = new Map<string, number>();
@@ -88,9 +114,10 @@ export interface TypeCrewRequirement {
  * and each set needs the per-airframe minimum crew.
  */
 export function computeTypeCrewRequirements(routes: Route[]): Record<string, TypeCrewRequirement> {
+  const charterOnlyTypes = getCharterOnlyTypeIds(routes);
   const byType: Record<string, TypeCrewRequirement> = {};
   for (const [typeId, hours] of typeWeeklyCycleHours(routes)) {
-    const req = getAircraftCrewRequirements(typeId);
+    const req = getAircraftCrewRequirements(typeId, charterOnlyTypes.has(typeId));
     if (!req) continue;
     const sets = crewSetsRequired(hours);
     byType[typeId] = {
@@ -317,13 +344,14 @@ export type AircraftCrewCaps = Record<'captain' | 'firstOfficer' | 'cabinCrew' |
 export function computeAircraftCrewCaps(fleet: Aircraft[], routes: Route[]): Map<string, AircraftCrewCaps> {
   const usableFleet = fleet.filter(isUsableAircraft);
   const workloadByType = computeTypeCrewRequirements(routes);
+  const charterOnlyTypes = getCharterOnlyTypeIds(routes);
   const usableCountByType = new Map<string, number>();
   for (const a of usableFleet) {
     usableCountByType.set(a.typeId, (usableCountByType.get(a.typeId) ?? 0) + 1);
   }
   const caps = new Map<string, AircraftCrewCaps>();
   for (const a of usableFleet) {
-    const min = getAircraftCrewRequirements(a.typeId);
+    const min = getAircraftCrewRequirements(a.typeId, charterOnlyTypes.has(a.typeId));
     if (!min) continue;
     const cap: AircraftCrewCaps = {
       captain: min.captain,
@@ -378,6 +406,8 @@ export function computeCrewPlan(staff: StaffMember[], fleet: Aircraft[], routes:
   for (const route of routes) {
     if (route.isActive && route.aircraftId) flying.add(route.aircraftId);
   }
+  // Types used ONLY for charter missions fly with a two-pilot crew and no cabin service.
+  const charterOnlyTypes = getCharterOnlyTypeIds(routes);
 
   // --- 1. Validate sticky assignments ----------------------------------------
   for (const m of staff) {
@@ -413,7 +443,7 @@ export function computeCrewPlan(staff: StaffMember[], fleet: Aircraft[], routes:
   type RoleKey = 'captain' | 'firstOfficer' | 'purser' | 'cabinCrew';
   const slots = new Map<string, Record<RoleKey, number>>();
   for (const a of usableFleet) {
-    if (!getAircraftCrewRequirements(a.typeId)) continue;
+    if (!getAircraftCrewRequirements(a.typeId, charterOnlyTypes.has(a.typeId))) continue;
     slots.set(a.id, { captain: 0, firstOfficer: 0, cabinCrew: 0, purser: 0 });
   }
   for (const m of staff) {
@@ -515,7 +545,7 @@ export function computeCrewPlan(staff: StaffMember[], fleet: Aircraft[], routes:
   const manningByType: Record<string, AircraftCrewManning> = {};
   const typesInFleet = new Set(usableFleet.map((a) => a.typeId));
   for (const typeId of typesInFleet) {
-    const req = getAircraftCrewRequirements(typeId)!;
+    const req = getAircraftCrewRequirements(typeId, charterOnlyTypes.has(typeId))!;
     const airframes = usableFleet.filter((a) => a.typeId === typeId);
     let pilotPairedAircraft = 0;
     const sum: Record<RoleKey, number> = { captain: 0, firstOfficer: 0, cabinCrew: 0, purser: 0 };

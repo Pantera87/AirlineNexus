@@ -5,6 +5,8 @@ import { AIRPORT_DATABASE } from '@/data/airports';
 import { getLoopCycleMinutes, getRouteCycleMinutes } from '@/utils/routeEngine';
 import {
   typeWeeklyCycleHours,
+  getCharterOnlyTypeIds,
+  getAircraftCrewRequirements,
   computeTypeCrewRequirements,
   computeStaffingStatus,
   computeCrewPlan,
@@ -483,6 +485,122 @@ describe('workload-sized rotation sets', () => {
     expect(plan.cabinPool.purserRequired).toBe(2);
     expect(plan.manningByType['b737-800'].maned.cabinCrew).toBe(8);
     expect(plan.manningByType['b737-800'].maned.purser).toBe(2);
+    expect(plan.cabinPool.coverageFactor).toBe(1);
+    expect(plan.totalReleased).toBe(0);
+  });
+});
+
+// --- Charter mission crew (route.operationType === 'charter') --------------------
+//
+// A charter mission is a private flight: the airframe is crewed by two pilots and
+// carries no cabin service, so a type whose ONLY active routes are charters needs
+// no purser and no cabin crew. Its workload still counts the EMPTY repositioning
+// leg back to the mission base (the path [base, destination] closes on itself),
+// and a busy schedule still demands rotating crew sets like any other route.
+//
+// crj-200: cruise 490 kt → avg 450 kt; regional turnaround 30 min.
+//   JFK→ORD = 641 nm → leg round(641/450·60) = 85 min → mission cycle 2·85 + 2·30 = 230 min
+//   7 revenue trips/week = 26.83 cycle-h → 26.83/17.31 ≈ 1.55 → 2 rotating crew sets.
+
+const CRJ = getAircraftById('crj-200')!;
+const ORD = AIRPORT_DATABASE.find((a) => a.iata === 'ORD')!;
+
+/** A charter mission out of JFK — the origin is the mission base, not a hub. */
+function makeMission(overrides: Partial<Route> = {}): Route {
+  return {
+    ...makeRoute({
+      id: 'mission-1',
+      origin: 'JFK',
+      destination: 'ORD',
+      aircraftId: 'crj-200',
+      distanceNm: 641,
+      frequency: 7,
+      ...overrides,
+    }),
+    operationType: 'charter',
+  };
+}
+
+describe('charter mission crew', () => {
+  it('flags a type whose only active routes are charters', () => {
+    expect(getCharterOnlyTypeIds([makeMission()])).toEqual(new Set(['crj-200']));
+    // A scheduled route on the same type means the airframe carries fare-paying
+    // passengers somewhere → full crew is required again.
+    expect(getCharterOnlyTypeIds([makeMission(), makeRoute({ id: 'sched', aircraftId: 'crj-200' })])).toEqual(new Set());
+    // Inactive missions fly nothing → nothing is charter-only this week.
+    expect(getCharterOnlyTypeIds([makeMission({ isActive: false })])).toEqual(new Set());
+  });
+
+  it('asks for two pilots and no cabin service per charter airframe', () => {
+    expect(getAircraftCrewRequirements('crj-200', true)).toEqual({ captain: 1, firstOfficer: 1, purser: 0, cabinCrew: 0 });
+    // Unflagged, the same regional carries cabin service (1 purser + ceil(50/50)).
+    expect(getAircraftCrewRequirements('crj-200', false)).toEqual({ captain: 1, firstOfficer: 1, purser: 1, cabinCrew: 1 });
+  });
+
+  it('charges the workload for the revenue leg AND the empty return leg', () => {
+    const hours = typeWeeklyCycleHours([makeMission()]).get('crj-200')!;
+    expect(hours).toBeCloseTo((7 * getLoopCycleMinutes([JFK, ORD], CRJ)) / 60, 5);
+    // A charter mission is exactly the hub-loop maths for a two-airport path…
+    const asLoop = typeWeeklyCycleHours([makeRoute({ id: 'loop', origin: 'JFK', destination: 'ORD', aircraftId: 'crj-200', distanceNm: 641, frequency: 7 })]).get('crj-200')!;
+    expect(hours).toBeCloseTo(asLoop, 5);
+  });
+
+  it('sizes charter rotation sets from the mission workload — pilots only', () => {
+    const req = computeTypeCrewRequirements([makeMission()])['crj-200']!;
+    expect(req.weeklyHours).toBeCloseTo((7 * 230) / 60, 5);
+    expect(req.sets).toBe(2);
+    expect(req.captain).toBe(2);
+    expect(req.firstOfficer).toBe(2);
+    expect(req.purser).toBe(0);
+    expect(req.cabinCrew).toBe(0);
+  });
+
+  it('keeps the full cabin requirement when the type also flies scheduled routes', () => {
+    const req = computeTypeCrewRequirements([makeMission(), makeRoute({ id: 'sched', origin: 'JFK', destination: 'ORD', aircraftId: 'crj-200', distanceNm: 641, frequency: 1 })])['crj-200']!;
+    // 7 mission cycles + 1 scheduled round trip = 8 × 230 min = 30.67 cycle-h → 2 sets.
+    expect(req.weeklyHours).toBeCloseTo((8 * 230) / 60, 5);
+    expect(req.sets).toBe(2);
+    expect(req.captain).toBe(2);
+    expect(req.purser).toBe(2); // 2 sets × 1 purser — the type is no longer charter-only
+    expect(req.cabinCrew).toBe(2); // 2 sets × ceil(50 / 50)
+  });
+
+  it('reports a charter mission in the staffing status with a zero cabin requirement', () => {
+    const status = computeStaffingStatus([makeMission()], [], [makeAircraft('crj-200')]);
+    const pilots = status.find((d) => d.key === 'pilots')!;
+    const cabin = status.find((d) => d.key === 'cabin')!;
+    expect(pilots.required).toBe(4); // 2 sets × (1 captain + 1 first officer)
+    expect(pilots.missing).toBe(4);
+    expect(pilots.pilotBreakdown).toEqual([
+      {
+        typeId: 'crj-200',
+        sets: 2,
+        captain: 2,
+        firstOfficer: 2,
+        ratedCaptains: 0,
+        ratedFirstOfficers: 0,
+        missingCaptains: 2,
+        missingFirstOfficers: 2,
+      },
+    ]);
+    expect(cabin.required).toBe(0);
+    expect(cabin.missing).toBe(0);
+    expect(cabin.cabinDetail).toEqual({
+      purser: { required: 0, available: 0, missing: 0 },
+      cabinCrew: { required: 0, available: 0, missing: 0 },
+    });
+  });
+
+  it('rosters the charter rotation with no cabin crew on the airframe', () => {
+    const staff = [...crewOf(2, 'captain'), ...crewOf(2, 'first-officer')];
+    const plan = computeCrewPlan(staff, [makeAircraft('crj-200')], [makeMission()]);
+    expect(plan.manningByType['crj-200'].maned.captain).toBe(2);
+    expect(plan.manningByType['crj-200'].maned.firstOfficer).toBe(2);
+    expect(plan.manningByType['crj-200'].maned.purser).toBe(0);
+    expect(plan.manningByType['crj-200'].maned.cabinCrew).toBe(0);
+    // Nothing cabin is required, so the shared pool reports full coverage.
+    expect(plan.cabinPool.purserRequired).toBe(0);
+    expect(plan.cabinPool.cabinCrewRequired).toBe(0);
     expect(plan.cabinPool.coverageFactor).toBe(1);
     expect(plan.totalReleased).toBe(0);
   });

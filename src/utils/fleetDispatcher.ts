@@ -2,10 +2,12 @@
 // Fleet Dispatcher — automatic, location-aware aircraft-to-route assignment
 // ============================================================
 //
-// Aircraft belong to a SHARED POOL per type. Because every route is a closed
-// hub loop (it starts and ends at the hub), an aircraft's home base is always
-// the hub: deploying it only requires that it can stand at the hub — or paying
-// a one-time "positioning" cost to deadhead it back. The dispatcher will:
+// Aircraft belong to a SHARED POOL per type. A scheduled route is a closed hub
+// loop, so the home base of an aircraft serving one is always the hub; a charter
+// mission (route.operationType === 'charter') is point-to-point, so its aircraft
+// are based at the mission origin instead. Deploying an aircraft therefore means
+// either finding it at its home base — or paying a one-time "positioning" cost to
+// deadhead it back. The dispatcher will:
 //   1. Compute how many aircraft each ACTIVE route needs on its own to sustain
 //      its frequency (ceil(frequency / full cycles per week)).
 //   2. Keep aircraft already flying a route ("sticky") — no needless shuffling.
@@ -29,6 +31,7 @@ import {
   estimateFlightTimeMinutes,
   findAircraftById,
   maxLoopCyclesPerDay,
+  previewCharterEconomics,
   previewLoopEconomics,
 } from './routeEngine';
 
@@ -51,6 +54,7 @@ export interface PoolStats {
 }
 
 export interface DispatchInput {
+  /** The airline hub — home base for scheduled routes (charter missions base at their own origin). */
   hubIata: string;
   routes: Route[];
   fleet: Aircraft[];
@@ -64,9 +68,9 @@ export interface DispatchInput {
 }
 
 export interface DispatchPlan {
-  /** Aircraft whose assignment CHANGES: new routeId, or null when released back to the hub pool. */
+  /** Aircraft whose assignment CHANGES: new routeId, or null when released back to its home-base pool. */
   assignments: Map<string, string | null>;
-  /** aircraftId → one-time cost to deadhead it back to the hub this dispatch. */
+  /** aircraftId → one-time cost to deadhead it back to its home base this dispatch. */
   positionCosts: Map<string, number>;
   totalPositionCost: number;
   staffing: Record<string, RouteStaffing>;
@@ -121,21 +125,23 @@ export function getRouteStaffing(fleet: Aircraft[], routeId: string): number {
 }
 
 /**
- * One-time cost to deadhead an aircraft from `fromIata` back to the hub:
- * fuel for the repositioning flight + a blended landing/handling share at the hub.
+ * One-time cost to deadhead an aircraft from `fromIata` back to its home base:
+ * fuel for the repositioning flight + a blended landing/handling share at the base.
+ * The base is the airline hub for scheduled routes and the mission origin for
+ * charter missions (see computeDispatchPlan).
  */
 export function estimatePositioningCost(
   fromIata: string,
   type: AircraftType,
-  hubAirport: Airport | undefined,
+  baseAirport: Airport | undefined,
   fuelPricePerKg: number
 ): number {
-  if (!hubAirport || !fromIata || fromIata === hubAirport.iata) return 0;
+  if (!baseAirport || !fromIata || fromIata === baseAirport.iata) return 0;
   const from = AIRPORT_DATABASE.find((a) => a.iata === fromIata);
   if (!from) return 0; // Unknown airport — treat as free (should not happen in practice).
-  const minutes = estimateFlightTimeMinutes(calculateRouteDistanceNm(from, hubAirport), type);
+  const minutes = estimateFlightTimeMinutes(calculateRouteDistanceNm(from, baseAirport), type);
   const fuelCost = type.fuelBurnPerHour * (minutes / 60) * fuelPricePerKg;
-  return Math.round(fuelCost + hubAirport.landingFee * 0.15);
+  return Math.round(fuelCost + baseAirport.landingFee * 0.15);
 }
 
 interface RouteDemand {
@@ -164,11 +170,23 @@ export function computeDispatchPlan(input: DispatchInput): DispatchPlan {
   let releasedCount = 0;
   const touched = new Set<string>();
 
+  // Home base for each route: the hub for scheduled loops, the mission origin for
+  // charter missions (they are point-to-point, so their aircraft stand at the base
+  // they fly from rather than shuttling back to the hub).
+  const charterBaseAirport = new Map<string, Airport | undefined>(
+    routes
+      .filter((r) => r.operationType === 'charter')
+      .map((r) => [r.id, AIRPORT_DATABASE.find((a) => a.iata === r.origin)])
+  );
+
   const isUsable = (a: Aircraft): boolean => a.status === 'available' || a.status === 'in-flight';
-  const positionCostOf = (a: Aircraft, type: AircraftType): number =>
-    a.currentLocation && a.currentLocation !== hubIata
-      ? estimatePositioningCost(a.currentLocation, type, hubAirport, fuelPrice)
-      : 0;
+  const baseAirportOf = (a: Aircraft): Airport | undefined =>
+    charterBaseAirport.get(a.assignedRoute ?? '') ?? hubAirport;
+  const positionCostOf = (a: Aircraft, type: AircraftType): number => {
+    const base = baseAirportOf(a);
+    if (!a.currentLocation || (base && a.currentLocation === base.iata)) return 0;
+    return estimatePositioningCost(a.currentLocation, type, base, fuelPrice);
+  };
 
   // --- 1. Route demand per type (active routes only) -------------------------
   const activeRouteIds = new Set(routes.filter((r) => r.isActive).map((r) => r.id));
@@ -185,15 +203,37 @@ export function computeDispatchPlan(input: DispatchInput): DispatchPlan {
         typeId: type.id,
         type,
         path,
+        // A charter mission resolves to a two-airport path, so the loop capacity here
+        // is exactly its max trips/week and the required count is ceil(freq / that).
         required: getRequiredAircraftCount(path, type, route.frequency),
         staffed: fleet.filter((a) => a.assignedRoute === route.id && a.typeId === type.id).length,
         // Out-of-range routes rank last (and need 0 aircraft) — they simply cannot operate.
-        // Rank uses each route's player-set price and the airline's business model.
+        // Rank uses each route's player-set price and the airline's business model;
+        // charter missions rank on their own (deadhead-inclusive) charter economics.
         rank: path
-          ? previewLoopEconomics(path, type, route.frequency, fuelPrice, {
-              model: input.businessModel,
-              fareMultiplier: route.fareMultiplier,
-            }).weeklyProfit
+          ? (route.operationType === 'charter'
+              ? previewCharterEconomics(
+                  path[0],
+                  path[1],
+                  type,
+                  route.frequency,
+                  fuelPrice,
+                  {
+                    model: input.businessModel,
+                    fareMultiplier: route.fareMultiplier,
+                  }
+                )
+              : previewLoopEconomics(
+                  path,
+                  type,
+                  route.frequency,
+                  fuelPrice,
+                  {
+                    model: input.businessModel,
+                    fareMultiplier: route.fareMultiplier,
+                  }
+                )
+          ).weeklyProfit
           : 0,
       },
     ]);
