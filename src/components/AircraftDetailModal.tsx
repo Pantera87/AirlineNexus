@@ -6,6 +6,7 @@ import { ConditionGrade } from '../types/game';
 import { AIRCRAFT_TYPES } from '../data/aircraft-types';
 import PurchaseDialog from './PurchaseDialog';
 import { useUnits, formatDistanceKm, formatSpeedKmh } from '../utils/units';
+import AircraftImage from './AircraftImage';
 
 
 export default function AircraftDetailModal() {
@@ -58,8 +59,8 @@ export default function AircraftDetailModal() {
         <div className="p-6">
           {/* Header */}
           <div className="flex flex-col lg:flex-row gap-6 mb-6">
-            {/* Aircraft artwork (placeholder for real photo) */}
-            <div className="w-full lg:w-1/2 h-64 overflow-hidden rounded-lg bg-linear-to-br from-sky-900/40 via-runway-800/60 to-blue-900/40" />
+            {/* Aircraft artwork (1024×1024 photo or gradient fallback) */}
+            <AircraftImage aircraftId={listing.aircraftTypeId} size="full" alt={`${aircraftType.manufacturer} ${aircraftType.model}`} className="lg:w-1/2" />
 
             {/* Basic info */}
             <div className="lg:w-1/2 space-y-4">

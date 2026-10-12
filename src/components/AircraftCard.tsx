@@ -5,6 +5,7 @@ import { formatCurrency } from '../utils/helpers';
 import { type AircraftListing, ConditionGrade } from '../types/game';
 import { AIRCRAFT_TYPES } from '../data/aircraft-types';
 import { useUnits, formatDistanceKm, formatSpeedKmh } from '../utils/units';
+import AircraftImage from './AircraftImage';
 
 
 interface AircraftCardProps {
@@ -30,8 +31,8 @@ export default function AircraftCard({ listing }: AircraftCardProps) {
       onMouseLeave={() => setIsHovered(false)}
       className={`aircraft-card-glass w-full p-4 text-left transition-all duration-300 ${isHovered ? 'scale-[1.02]' : ''}`}
     >
-      {/* Aircraft artwork (placeholder for real photo) */}
-      <div className="mb-3 w-full aspect-video rounded-lg bg-linear-to-br from-sky-900/40 via-runway-800/60 to-blue-900/40" />
+      {/* Aircraft artwork (1024×1024 photo or gradient fallback) */}
+      <AircraftImage aircraftId={listing.aircraftTypeId} size="full" alt={`${aircraftType.manufacturer} ${aircraftType.model}`} className="mb-3" />
 
       {/* Manufacturer badge */}
       <div className="manufacturer-badge inline-block px-3 py-1 rounded-full text-xs font-medium mb-2">

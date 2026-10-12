@@ -9,6 +9,7 @@ import { useUnits, formatDistanceNm, formatSpeedKt } from '@/utils/units';
 import { Plane, Plus, X, DollarSign, Gauge, Users, Navigation, TrendingDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { StatusPill, MeterBar, toneFromStatus } from '@/components/icons/StatusIcons';
+import AircraftImage from '../AircraftImage';
 
 // Estimate resale value: ~5% depreciation per year + condition factor
 function estimateSalePrice(aircraft: Aircraft): number | null {
@@ -207,8 +208,8 @@ export function FleetScreen() {
                 const type = AIRCRAFT_DATABASE.find((a) => a.id === aircraft.typeId);
                 return (
                   <div key={aircraft.id} className="glass-panel p-2 flex flex-col">
-                    {/* Aircraft artwork (placeholder for real photo) */}
-                    <div className="w-full aspect-video rounded-lg bg-linear-to-br from-sky-900/40 via-runway-800/60 to-blue-900/40" />
+                    {/* Aircraft artwork (1024×1024 photo or gradient fallback) */}
+                    <AircraftImage aircraftId={aircraft.typeId} size="sm" alt={`${type?.name || 'Unknown'}`} className="shrink-0" />
                     <div className="mt-1.5 min-w-0">
                       <p className="text-sm font-semibold text-white truncate">{type?.name || 'Unknown'}</p>
                       <div className="flex items-center gap-2 mt-1">
@@ -396,8 +397,8 @@ export function FleetScreen() {
                   <div key={ac.id} className="p-4 rounded-lg bg-runway-800/50 hover:bg-runway-800 transition-colors">
                       <div className="flex items-center justify-between">
                       <div className="flex-1 flex items-center gap-3">
-                        {/* Aircraft artwork (placeholder for real photo) */}
-                        <div className="w-20 h-12 rounded-lg shrink-0 bg-linear-to-br from-sky-900/40 via-runway-800/60 to-blue-900/40" />
+                        {/* Aircraft artwork (1024×1024 photo or gradient fallback) */}
+                        <AircraftImage aircraftId={ac.id} size="sm" alt={ac.name} className="shrink-0" />
                         <div className="flex items-center gap-2 mb-2">
                           <h3 className="text-sm font-semibold text-white">{ac.name}</h3>
                           <span className="badge badge-info">{ac.category}</span>
