@@ -9,7 +9,7 @@
 // ============================================================
 
 import type { Airline, Airport, Route, WorldState } from '@/types/game';
-import { AIRPORT_DATABASE } from '@/data/airports';
+import { getAirportByIata } from '@/data/airports';
 import {
   findAircraftById,
   getAircraftWeeklyFixedCosts,
@@ -27,7 +27,7 @@ export const WEEKS_PER_MONTH = 52 / 12;
 
 /** Resolve a route's full loop path (HUB → stops… → DEST) to airport objects, or null if any IATA is unknown. */
 function resolveRoutePathAirports(route: Route): Airport[] | null {
-  const airports = getRoutePath(route).map((iata) => AIRPORT_DATABASE.find((a) => a.iata === iata));
+  const airports = getRoutePath(route).map((iata) => getAirportByIata(iata));
   return airports.every((a) => !!a) ? (airports as Airport[]) : null;
 }
 
@@ -84,8 +84,8 @@ export function computeExpenseBreakdown(airline: Airline, world: WorldState): Ex
     const type = findAircraftById(route.aircraftId);
     if (!type) continue;
 
-    const origin = AIRPORT_DATABASE.find((a) => a.iata === route.origin);
-    const dest = AIRPORT_DATABASE.find((a) => a.iata === route.destination);
+    const origin = getAirportByIata(route.origin);
+    const dest = getAirportByIata(route.destination);
     if (!origin || !dest) continue;
 
     const path = resolveRoutePathAirports(route);

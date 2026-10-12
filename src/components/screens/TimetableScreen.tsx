@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 import { useGameStore } from '@store/gameStore';
-import { AIRCRAFT_DATABASE } from '@data/aircraft';
+import { getAircraftById } from '@data/aircraft';
 import { formatFlightTime } from '@/utils/routeEngine';
 import { DAY_LABELS, formatMinutes } from '@/utils/timetable';
 import { CalendarClock, Map as MapIcon, Plane } from 'lucide-react';
@@ -39,7 +39,7 @@ export function TimetableScreen() {
   const routeForLeg = (leg: TimetableLeg): Route | undefined =>
     seqToRoute.get(Math.floor(parseInt(leg.flightNumber, 10) / 100));
   const aircraftName = (route: Route | undefined): string =>
-    (route ? AIRCRAFT_DATABASE.find((t) => t.id === route.aircraftId)?.name : undefined) ?? '-';
+    (route ? getAircraftById(route.aircraftId)?.name : undefined) ?? '-';
 
   return (
     <div className="h-full overflow-auto p-6 space-y-6">

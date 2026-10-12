@@ -1,5 +1,5 @@
 import { useGameStore } from '@store/gameStore';
-import { AIRCRAFT_DATABASE } from '@data/aircraft';
+import { getAircraftById } from '@data/aircraft';
 import { formatCurrency, formatShortDate } from '@utils/helpers';
 import { Plane, TrendingUp, DollarSign, Users, AlertCircle, BarChart3, PieChart } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -85,7 +85,7 @@ export function DashboardScreen() {
           profit: Math.round(r.profit),
         }));
         const fleetByCategory = airline.fleet.reduce<Record<string, number>>((acc, a) => {
-          const cat = AIRCRAFT_DATABASE.find((t) => t.id === a.typeId)?.category ?? 'other';
+          const cat = getAircraftById(a.typeId)?.category ?? 'other';
           acc[cat] = (acc[cat] ?? 0) + 1;
           return acc;
         }, {});
@@ -167,7 +167,7 @@ export function DashboardScreen() {
           ) : (
             <div className="space-y-2">
               {airline.fleet.slice(0, 5).map((aircraft) => {
-                const type = AIRCRAFT_DATABASE.find((a) => a.id === aircraft.typeId);
+                const type = getAircraftById(aircraft.typeId);
                 return (
                   <div key={aircraft.id} className="flex items-center justify-between p-3 rounded-lg bg-runway-800/50">
                     <div className="flex items-center gap-3">

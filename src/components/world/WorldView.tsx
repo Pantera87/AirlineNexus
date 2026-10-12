@@ -4,7 +4,7 @@ import { useRef, useMemo } from 'react'
 import { ShaderMaterial, Vector3, Group, DirectionalLight } from 'three'
 import { useGameStore } from '@/store/gameStore'
 import type { Aircraft, Route, Airport } from '@/types/game'
-import { AIRPORT_DATABASE } from '@/data/airports'
+import { getAirportByIata } from '@/data/airports'
 import earthVertShader from '@/shaders/earthDayNight.vert?raw'
 import earthFragShader from '@/shaders/earthDayNight.frag?raw'
 import { GLOBE_RADIUS, latLonToPosition } from '@/components/world/geo'
@@ -242,13 +242,11 @@ function Earth({ globeGroupRef }: { globeGroupRef: React.RefObject<Group | null>
 
 // Simple aircraft component
 function SimpleAircraft({ 
-  aircraft, 
-  airports 
+  aircraft
 }: { 
-  aircraft: Aircraft, 
-  airports: Airport[]
+  aircraft: Aircraft
 }) {
-  const currentAirport = airports.find(a => a.iata === aircraft.currentLocation)
+  const currentAirport = aircraft.currentLocation ? getAirportByIata(aircraft.currentLocation) : undefined
   
   const position: [number, number, number] = [0, 0, 0]
   
@@ -331,17 +329,15 @@ function RouteArc({ from, to }: { from: Airport; to: Airport }) {
 
 // Flight route component — draws one arc per leg of the closed loop, including the return to hub.
 function FlightRoute({ 
-  route, 
-  airports 
+  route
 }: { 
-  route: Route, 
-  airports: Airport[]
+  route: Route
 }) {
   const pathIatas = [route.origin, ...(route.stops ?? []), route.destination]
   
   // Resolve every airport in the chain (skipping any missing from the database).
   const resolved = pathIatas
-    .map((iata) => airports.find((a) => a.iata === iata))
+    .map((iata) => getAirportByIata(iata))
     .filter((a): a is Airport => Boolean(a))
 
   const legs: [Airport, Airport][] = []
@@ -382,7 +378,6 @@ const WorldView = () => {
     )
   }
   
-  const airports = AIRPORT_DATABASE
   const aircrafts = airline.fleet || []
   const routes = airline.routes || []
   
@@ -411,7 +406,6 @@ const WorldView = () => {
             <SimpleAircraft 
               key={aircraft.id} 
               aircraft={aircraft} 
-              airports={airports}
             />
           ))}
 
@@ -420,7 +414,6 @@ const WorldView = () => {
             <FlightRoute 
               key={route.id} 
               route={route} 
-              airports={airports}
             />
           ))}
         </group>

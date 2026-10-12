@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useGameStore } from '@store/gameStore';
 import type { Route, AircraftType, Airport, Aircraft, StaffMember } from '@/types/game';
 import { getAirportByIata, AIRPORT_DATABASE } from '@data/airports';
-import { AIRCRAFT_DATABASE } from '@data/aircraft';
+import { AIRCRAFT_DATABASE, getAircraftById } from '@data/aircraft';
 import { formatCurrency, formatPercentage } from '@utils/helpers';
 import { Map, Plus, X, Plane, Lightbulb, CheckCircle2, AlertTriangle, Pencil, Trash2, Pause, Play, Clock, Repeat, TrendingUp, TrendingDown, CalendarClock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -247,7 +247,7 @@ export function RoutesScreen() {
             const stopCount = route.stops?.length ?? 0;
             const distanceNm = route.distanceNm ?? 0;
             // Live staffing from the shared fleet pool (see utils/fleetDispatcher).
-            const routeType = AIRCRAFT_DATABASE.find((t) => t.id === route.aircraftId);
+            const routeType = getAircraftById(route.aircraftId);
             const staffedCount = getRouteStaffing(airline.fleet, route.id);
             const requiredCount = getRequiredAircraftCount(resolvePathAirports(pathIatas), routeType, route.frequency);
             const isCharterRoute = route.operationType === 'charter';
@@ -617,7 +617,7 @@ function RouteCreationForm({
   );
 
   const aircraftType = useMemo(
-    () => AIRCRAFT_DATABASE.find((t) => t.id === aircraftTypeId),
+    () => getAircraftById(aircraftTypeId),
     [aircraftTypeId]
   );
 
@@ -981,7 +981,7 @@ function CharterMissionForm({
   const baseAirport = useMemo(() => (baseIata ? getAirportByIata(baseIata) : undefined), [baseIata]);
   const missionAirport = useMemo(() => (destination ? getAirportByIata(destination) : undefined), [destination]);
   const aircraftType = useMemo(
-    () => AIRCRAFT_DATABASE.find((t) => t.id === aircraftTypeId),
+    () => getAircraftById(aircraftTypeId),
     [aircraftTypeId]
   );
 
@@ -1097,7 +1097,7 @@ function CharterMissionForm({
         <select value={aircraftTypeId} onChange={(e) => onAircraftTypeChange(e.target.value)} className="input-field w-full">
           <option value="">— Select aircraft type —</option>
           {flyableTypeIds.map((id) => {
-            const t = AIRCRAFT_DATABASE.find((a) => a.id === id)!;
+            const t = getAircraftById(id)!;
             return (
               <option key={id} value={id}>
                 {t.name} ({t.maxPassengers} seats)
@@ -1341,12 +1341,12 @@ function RouteDetailModal({ route, ownedTypeIds, currencyFormat, onClose, onSave
 
   const pathIatas = getRoutePath(route);
   const pathAirports = resolvePathAirports(pathIatas);
-  const aircraftType = AIRCRAFT_DATABASE.find((t) => t.id === aircraftTypeId);
+  const aircraftType = getAircraftById(aircraftTypeId);
   // Stored distanceNm: one-way for legacy direct routes, full loop total for multi-hop.
   const distanceNm = route.distanceNm ?? (pathAirports && pathAirports.length >= 2 ? calculateLoopDistanceNm(pathAirports) : 0);
 
   // Live staffing of this route's CURRENT aircraft type from the shared fleet pool.
-  const currentType = AIRCRAFT_DATABASE.find((t) => t.id === route.aircraftId);
+  const currentType = getAircraftById(route.aircraftId);
   const staffedCount = getRouteStaffing(fleet ?? [], route.id);
   const requiredCount = getRequiredAircraftCount(pathAirports, currentType, route.frequency);
   const poolStats = currentType ? getPoolStats(fleet ?? [], currentType.id) : null;

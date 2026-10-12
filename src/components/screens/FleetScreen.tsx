@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useGameStore } from '@store/gameStore';
-import { AIRCRAFT_DATABASE, getAircraftByCategory } from '@data/aircraft';
+import { AIRCRAFT_DATABASE, getAircraftById, getAircraftByCategory } from '@data/aircraft';
 import { formatCurrency } from '@utils/helpers';
 import type { Aircraft, AircraftCategory } from '@/types/game';
 import { getRoutePath } from '@/utils/routeEngine';
@@ -13,7 +13,7 @@ import AircraftImage from '../AircraftImage';
 
 // Estimate resale value: ~5% depreciation per year + condition factor
 function estimateSalePrice(aircraft: Aircraft): number | null {
-  const type = AIRCRAFT_DATABASE.find((a) => a.id === aircraft.typeId);
+  const type = getAircraftById(aircraft.typeId);
   if (!type) return null;
   const ageFactor = Math.max(0.1, 1 - aircraft.age * 0.05);
   const conditionFactor = aircraft.condition / 100;
@@ -90,7 +90,7 @@ export function FleetScreen() {
       : getAircraftByCategory(activeCategory);
 
   const handlePurchase = (typeId: string) => {
-    const aircraftType = AIRCRAFT_DATABASE.find((a) => a.id === typeId);
+    const aircraftType = getAircraftById(typeId);
     if (!aircraftType) return;
 
     if (airline.finances.cash < aircraftType.acquisitionCost) {
@@ -126,7 +126,7 @@ export function FleetScreen() {
           <h1 className="text-2xl font-bold text-white">Fleet Management</h1>
           <p className="text-sm text-runway-400">
             {airline.fleet.filter((aircraft) => {
-              const type = AIRCRAFT_DATABASE.find((a) => a.id === aircraft.typeId);
+              const type = getAircraftById(aircraft.typeId);
               return activeCategory === 'all' || type?.category === activeCategory;
             }).length} aircraft in fleet
           </p>
@@ -163,7 +163,7 @@ export function FleetScreen() {
       {poolByType.size > 0 && (
         <div className="flex flex-wrap gap-2">
           {[...poolByType.entries()].map(([typeId, stats]) => {
-            const type = AIRCRAFT_DATABASE.find((t) => t.id === typeId);
+            const type = getAircraftById(typeId);
             return (
               <span
                 key={typeId}
@@ -200,12 +200,12 @@ export function FleetScreen() {
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
             {airline.fleet
               .filter((aircraft) => {
-                const type = AIRCRAFT_DATABASE.find((a) => a.id === aircraft.typeId);
+                const type = getAircraftById(aircraft.typeId);
                 if (!type) return false;
                 return activeCategory === 'all' || type.category === activeCategory;
               })
               .map((aircraft) => {
-                const type = AIRCRAFT_DATABASE.find((a) => a.id === aircraft.typeId);
+                const type = getAircraftById(aircraft.typeId);
                 return (
                   <div key={aircraft.id} className="glass-panel p-2 flex flex-col">
                     {/* Aircraft artwork (1024×1024 photo or gradient fallback) */}
@@ -298,7 +298,7 @@ export function FleetScreen() {
               )}
 
               {!saleResult && (() => {
-                const type = AIRCRAFT_DATABASE.find((a) => a.id === aircraftToSell.typeId);
+                const type = getAircraftById(aircraftToSell.typeId);
                 const salePrice = estimateSalePrice(aircraftToSell);
                 return (
                   <>

@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useGameStore } from '@store/gameStore';
 import { formatCurrency } from '@utils/helpers';
-import { AIRPORT_DATABASE } from '@/data/airports';
+import { getAirportByIata } from '@/data/airports';
 import { findAircraftById, previewLoopEconomics, getRoutePath } from '@/utils/routeEngine';
 import type { Airport } from '@/types/game';
 import { Fuel, TrendingUp, TrendingDown, Gauge, Flame } from 'lucide-react';
@@ -56,7 +56,7 @@ export function FuelScreen() {
       if (!route.isActive) continue;
       // Full closed-loop path: hub → stops… → destination (loop closes back to hub).
       const pathAirports = getRoutePath(route)
-        .map((iata) => AIRPORT_DATABASE.find((a) => a.iata === iata))
+        .map((iata) => getAirportByIata(iata))
         .filter((a): a is Airport => Boolean(a));
       if (pathAirports.length < 2) continue;
       const aircraftType = findAircraftById(route.aircraftId);

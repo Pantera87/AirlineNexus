@@ -358,17 +358,25 @@ const DERIVED_AIRCRAFT: AircraftType[] = Object.values(AIRCRAFT_TYPES)
 // Comprehensive aircraft database for the simulation
 export const AIRCRAFT_DATABASE: AircraftType[] = [...LEGACY_AIRCRAFT, ...DERIVED_AIRCRAFT];
 
+// id → entry index for O(1) lookups. The database is static module data, so the
+// index is built once on load. First entry wins on a duplicated id, matching
+// Array#find semantics.
+const AIRCRAFT_BY_ID = new Map<string, AircraftType>();
+for (const entry of AIRCRAFT_DATABASE) {
+  if (!AIRCRAFT_BY_ID.has(entry.id)) AIRCRAFT_BY_ID.set(entry.id, entry);
+}
+
 // Resolve a marketplace listing's aircraftTypeId to the exact AIRCRAFT_DATABASE
 // entry for that airframe (null only for unknown types).
 export function gameIdForMarketplaceType(marketplaceId: string): string | null {
   const alias = MARKETPLACE_ID_ALIASES[marketplaceId];
   if (alias) return alias;
-  return AIRCRAFT_DATABASE.some((t) => t.id === marketplaceId) ? marketplaceId : null;
+  return AIRCRAFT_BY_ID.has(marketplaceId) ? marketplaceId : null;
 }
 
 // Helper functions
 export function getAircraftById(id: string): AircraftType | undefined {
-  return AIRCRAFT_DATABASE.find(ac => ac.id === id);
+  return AIRCRAFT_BY_ID.get(id);
 }
 
 export function getAircraftByCategory(category: string): AircraftType[] {

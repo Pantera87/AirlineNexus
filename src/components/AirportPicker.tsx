@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { Search, MapPin, X } from 'lucide-react';
 import type { Airport } from '@/types/game';
-import { AIRPORT_DATABASE } from '@/data/airports';
+import { AIRPORT_DATABASE, getAirportByIata } from '@/data/airports';
 
 interface AirportPickerProps {
   label: string;
@@ -25,7 +25,7 @@ export function AirportPicker({ label, value, onChange, excludeIata, excludeIata
   const containerRef = useRef<HTMLDivElement>(null);
 
   const selectedAirport = useMemo(
-    () => (value ? AIRPORT_DATABASE.find((a) => a.iata === value) ?? null : null),
+    () => (value ? getAirportByIata(value) ?? null : null),
     [value]
   );
 

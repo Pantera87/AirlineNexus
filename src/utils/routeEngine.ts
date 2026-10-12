@@ -1,5 +1,5 @@
 import { Airport, AircraftType, AircraftCategory, BusinessModel } from '@/types/game';
-import { AIRCRAFT_DATABASE } from '@/data/aircraft';
+import { getAircraftById } from '@/data/aircraft';
 import { maxLoopsPerDay } from './crewRegulations';
 import { getBusinessModelConfig } from './businessModels';
 
@@ -175,17 +175,24 @@ export const DAILY_DUTY_HOURS = 16;
 /**
  * Score a potential route's attractiveness (0–100) from the two airports'
  * popularity and distance decay. Higher = more passengers expected.
+ * `distanceNm` is the great-circle distance the caller has already computed —
+ * the discovery loops scan thousands of candidates and must not pay for the
+ * trigonometry twice.
  */
-export function scoreRouteDemand(origin: Airport, destination: Airport): number {
+function scoreRouteDemandAtDistance(origin: Airport, destination: Airport, distanceNm: number): number {
   const pairPopularity = Math.min(origin.popularity, destination.popularity) / 100;
   const crossPopularity = ((origin.popularity + destination.popularity) / 2) / 100;
   const avgPopularity = pairPopularity * 0.35 + crossPopularity * 0.65;
 
-  const distanceNm = calculateRouteDistanceNm(origin, destination);
   // Short-haul routes carry more frequent flyers; long-haul fewer but premium.
   const distanceFactor = 1 / (1 + (distanceNm / 2500) ** 2);
 
   return Math.round(avgPopularity * distanceFactor * 100);
+}
+
+/** Same as above, computing the great-circle distance itself. */
+export function scoreRouteDemand(origin: Airport, destination: Airport): number {
+  return scoreRouteDemandAtDistance(origin, destination, calculateRouteDistanceNm(origin, destination));
 }
 
 // ============================================================
@@ -198,6 +205,12 @@ export interface ReachableDestination {
   demandScore: number;
 }
 
+// The candidate scan below is over the static airport database, so repeated
+// screen opens (routes panel, charter panel) reuse the previous result instead
+// of re-scanning. Keyed first by the candidate array identity, so a caller that
+// passes a different list can never borrow another list's results.
+const reachableCache = new WeakMap<Airport[], Map<string, ReachableDestination[]>>();
+
 /**
  * All airports within the aircraft's effective range of `origin`,
  * sorted by demand score (descending). Capped to keep UI snappy.
@@ -208,22 +221,39 @@ export function findReachableDestinations(
   allAirports: Airport[],
   maxResults = 50
 ): ReachableDestination[] {
+  const byKey = reachableCache.get(allAirports) ?? (() => {
+    const created = new Map<string, ReachableDestination[]>();
+    reachableCache.set(allAirports, created);
+    return created;
+  })();
+  const cacheKey = `${origin.iata}|${aircraft.id}|${maxResults}`;
+  const cached = byKey.get(cacheKey);
+  if (cached) return cached;
+
   const effective = getEffectiveRangeNm(aircraft);
+  // A great-circle distance is never smaller than the latitude separation
+  // (1° of latitude is 60 nm), so candidates further apart in latitude than the
+  // range allows are unreachable — drop them before paying for the trigonometry.
+  const maxLatitudeDeltaDeg = effective / 60;
   const results: ReachableDestination[] = [];
 
   for (const dest of allAirports) {
     if (dest.iata === origin.iata) continue;
+    if (Math.abs(dest.latitude - origin.latitude) > maxLatitudeDeltaDeg) continue;
     const distanceNm = calculateRouteDistanceNm(origin, dest);
     if (distanceNm > effective) continue;
     results.push({
       airport: dest,
       distanceNm,
-      demandScore: scoreRouteDemand(origin, dest),
+      demandScore: scoreRouteDemandAtDistance(origin, dest, distanceNm),
     });
   }
 
   results.sort((a, b) => b.demandScore - a.demandScore);
-  return results.slice(0, maxResults);
+  const limited = results.slice(0, maxResults);
+  if (byKey.size > 64) byKey.clear();
+  byKey.set(cacheKey, limited);
+  return limited;
 }
 
 /**
@@ -635,20 +665,30 @@ export function buildCharterTripOptions(
 }
 
 /**
- * Charter mission demand (0–100). Corporate traffic needs business traffic at BOTH
- * ends (the smaller market dominates), and distance decays far more gently than
- * scheduled traffic because missions are point-to-point by definition.
+ * Charter mission demand (0–100). Corporate traffic needs business traffic at
+ * BOTH ends (the smaller market dominates), and distance decays far more gently
+ * than scheduled traffic because missions are point-to-point by definition.
+ * `distanceNm` is the great-circle distance the caller already computed.
  */
-export function scoreCharterDemand(origin: Airport, destination: Airport, model?: BusinessModel): number {
+function scoreCharterDemandAtDistance(
+  origin: Airport,
+  destination: Airport,
+  distanceNm: number,
+  model?: BusinessModel
+): number {
   const pairPopularity = Math.min(origin.popularity, destination.popularity) / 100;
   const crossPopularity = ((origin.popularity + destination.popularity) / 2) / 100;
   const corporateBase = pairPopularity * 0.75 + crossPopularity * 0.25;
 
-  const distanceNm = calculateRouteDistanceNm(origin, destination);
   const distanceFactor = 1 / (1 + (distanceNm / 5000) ** 2);
 
   const factor = getBusinessModelConfig(model).charterDemandFactor ?? 1;
   return Math.round(Math.min(1, Math.max(0, corporateBase * distanceFactor * factor)) * 100);
+}
+
+/** Same as above, computing the great-circle distance itself. */
+export function scoreCharterDemand(origin: Airport, destination: Airport, model?: BusinessModel): number {
+  return scoreCharterDemandAtDistance(origin, destination, calculateRouteDistanceNm(origin, destination), model);
 }
 
 export interface CharterMission {
@@ -656,6 +696,9 @@ export interface CharterMission {
   distanceNm: number;
   demandScore: number;
 }
+
+/** Candidate discovery for charter missions — see the note on findReachableDestinations. */
+const charterCache = new WeakMap<Airport[], Map<string, CharterMission[]>>();
 
 /** All airports within this aircraft's range of `origin`, best charter missions first. */
 export function findCharterMissions(
@@ -665,16 +708,30 @@ export function findCharterMissions(
   maxResults = 50,
   model?: BusinessModel
 ): CharterMission[] {
+  const byKey = charterCache.get(allAirports) ?? (() => {
+    const created = new Map<string, CharterMission[]>();
+    charterCache.set(allAirports, created);
+    return created;
+  })();
+  const cacheKey = `${origin.iata}|${aircraft.id}|${maxResults}|${model ?? ''}`;
+  const cached = byKey.get(cacheKey);
+  if (cached) return cached;
+
   const effective = getEffectiveRangeNm(aircraft);
+  const maxLatitudeDeltaDeg = effective / 60;
   const results: CharterMission[] = [];
   for (const dest of allAirports) {
     if (dest.iata === origin.iata) continue;
+    if (Math.abs(dest.latitude - origin.latitude) > maxLatitudeDeltaDeg) continue;
     const distanceNm = calculateRouteDistanceNm(origin, dest);
     if (distanceNm > effective) continue;
-    results.push({ airport: dest, distanceNm, demandScore: scoreCharterDemand(origin, dest, model) });
+    results.push({ airport: dest, distanceNm, demandScore: scoreCharterDemandAtDistance(origin, dest, distanceNm, model) });
   }
   results.sort((a, b) => b.demandScore - a.demandScore);
-  return results.slice(0, maxResults);
+  const limited = results.slice(0, maxResults);
+  if (byKey.size > 64) byKey.clear();
+  byKey.set(cacheKey, limited);
+  return limited;
 }
 
 /** Top N charter mission suggestions from `origin` for this aircraft type. */
@@ -764,7 +821,7 @@ export function previewCharterEconomics(
  * Resolve a legacy AIRCRAFT_DATABASE entry by its id.
  */
 export function findAircraftById(id: string): AircraftType | undefined {
-  return AIRCRAFT_DATABASE.find((a) => a.id === id);
+  return getAircraftById(id);
 }
 
 

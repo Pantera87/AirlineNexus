@@ -21,8 +21,8 @@
 // ============================================================
 
 import type { Aircraft, Route, StaffMember } from '@/types/game';
-import { AIRCRAFT_DATABASE } from '@/data/aircraft';
-import { AIRPORT_DATABASE } from '@/data/airports';
+import { getAircraftById } from '@/data/aircraft';
+import { getAirportByIata } from '@/data/airports';
 import { getRoutePath, getRouteCycleMinutes, getLoopCycleMinutes } from './routeEngine';
 import { crewSetsRequired, isOnMandatoryRest } from './crewRegulations';
 
@@ -55,7 +55,7 @@ export function getAircraftCrewRequirements(typeId: string, charterOnly = false)
   cabinCrew: number;
   purser: number;
 } | null {
-  const type = AIRCRAFT_DATABASE.find((t) => t.id === typeId);
+  const type = getAircraftById(typeId);
   if (!type) return null;
   const noCabinService = charterOnly || type.category === 'cargo';
   return {
@@ -82,9 +82,9 @@ export function typeWeeklyCycleHours(routes: Route[]): Map<string, number> {
   const byType = new Map<string, number>();
   for (const route of routes) {
     if (!route.isActive || !route.aircraftId) continue;
-    const type = AIRCRAFT_DATABASE.find((t) => t.id === route.aircraftId);
+    const type = getAircraftById(route.aircraftId);
     if (!type || !route.distanceNm) continue;
-    const path = getRoutePath(route).map((iata) => AIRPORT_DATABASE.find((a) => a.iata === iata));
+    const path = getRoutePath(route).map((iata) => getAirportByIata(iata));
     const known = path.every((a) => a !== undefined);
     const cycleMinutes = known
       ? getLoopCycleMinutes(path as Parameters<typeof getLoopCycleMinutes>[0], type)

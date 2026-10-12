@@ -23,7 +23,7 @@
 // legitimately cover parts of several same-type routes per day.
 
 import type { Aircraft, Airport, AircraftType, BusinessModel, Route } from '@/types/game';
-import { AIRPORT_DATABASE } from '@/data/airports';
+import { getAirportByIata } from '@/data/airports';
 import {
   calculateRouteDistanceNm,
   checkLoopRange,
@@ -137,7 +137,7 @@ export function estimatePositioningCost(
   fuelPricePerKg: number
 ): number {
   if (!baseAirport || !fromIata || fromIata === baseAirport.iata) return 0;
-  const from = AIRPORT_DATABASE.find((a) => a.iata === fromIata);
+  const from = getAirportByIata(fromIata);
   if (!from) return 0; // Unknown airport — treat as free (should not happen in practice).
   const minutes = estimateFlightTimeMinutes(calculateRouteDistanceNm(from, baseAirport), type);
   const fuelCost = type.fuelBurnPerHour * (minutes / 60) * fuelPricePerKg;
@@ -160,7 +160,7 @@ interface RouteDemand {
 export function computeDispatchPlan(input: DispatchInput): DispatchPlan {
   const { hubIata, routes, fleet } = input;
   const fuelPrice = input.fuelPricePerKg ?? DEFAULT_FUEL_PRICE_PER_KG;
-  const hubAirport = AIRPORT_DATABASE.find((a) => a.iata === hubIata);
+  const hubAirport = getAirportByIata(hubIata);
 
   const assignments = new Map<string, string | null>();
   const positionCosts = new Map<string, number>();
@@ -176,7 +176,7 @@ export function computeDispatchPlan(input: DispatchInput): DispatchPlan {
   const charterBaseAirport = new Map<string, Airport | undefined>(
     routes
       .filter((r) => r.operationType === 'charter')
-      .map((r) => [r.id, AIRPORT_DATABASE.find((a) => a.iata === r.origin)])
+      .map((r) => [r.id, getAirportByIata(r.origin)])
   );
 
   const isUsable = (a: Aircraft): boolean => a.status === 'available' || a.status === 'in-flight';

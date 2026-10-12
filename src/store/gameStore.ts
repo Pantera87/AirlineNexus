@@ -17,8 +17,8 @@ import type {
   MonthlyReport,
   FinanceHistoryPoint,
 } from '@/types/game';
-import { AIRCRAFT_DATABASE } from '@data/aircraft';
-import { AIRPORT_DATABASE } from '@/data/airports';
+import { getAircraftById } from '@data/aircraft';
+import { getAirportByIata } from '@/data/airports';
 import { generateRegistrationForHub } from '@/data/registrationPrefixes';
 import { generateId, formatCurrency } from '@utils/helpers';
 import { GameTimeEngine } from '@/utils/gameTimeEngine';
@@ -78,7 +78,7 @@ function pushFinanceHistory(
 
 /** Resolve a route's full loop path (HUB → stops… → DEST) to airport objects, or null if any IATA is unknown. */
 function resolveRoutePathAirports(route: Route): Airport[] | null {
-  const airports = getRoutePath(route).map((iata) => AIRPORT_DATABASE.find((a) => a.iata === iata));
+  const airports = getRoutePath(route).map((iata) => getAirportByIata(iata));
   return airports.every((a) => !!a) ? (airports as Airport[]) : null;
 }
 
@@ -472,7 +472,7 @@ export const useGameStore = create<GameStore>()(
         const airline = state.airline;
         if (!airline) return false;
 
-        const aircraftType = AIRCRAFT_DATABASE.find((a) => a.id === typeId);
+        const aircraftType = getAircraftById(typeId);
         if (!aircraftType) return false;
 
         if (airline.finances.cash < aircraftType.acquisitionCost) {
@@ -539,7 +539,7 @@ export const useGameStore = create<GameStore>()(
         }
 
         // Calculate sale price if not provided
-        const aircraftType = AIRCRAFT_DATABASE.find((a) => a.id === aircraft.typeId);
+        const aircraftType = getAircraftById(aircraft.typeId);
         let finalSalePrice: number;
         if (salePrice !== undefined && salePrice > 0) {
           finalSalePrice = salePrice;
@@ -656,7 +656,7 @@ export const useGameStore = create<GameStore>()(
                     .map((s) => {
                       const route = airline.routes.find((r) => r.id === s.routeId);
                       const label = route ? getRoutePath(route).join('→') : s.routeId;
-                      const typeName = AIRCRAFT_DATABASE.find((t) => t.id === s.typeId)?.name ?? s.typeId;
+                      const typeName = getAircraftById(s.typeId)?.name ?? s.typeId;
                       return `${label} ${s.staffed}/${s.required}× ${typeName}`;
                     })
                     .join('; ')}.`
@@ -822,7 +822,7 @@ export const useGameStore = create<GameStore>()(
         // aircraft they can (now) fly.
         get().dispatchCrew();
 
-        const typeName = AIRCRAFT_DATABASE.find((t) => t.id === newTypeId)?.name ?? newTypeId;
+        const typeName = getAircraftById(newTypeId)?.name ?? newTypeId;
         if (state.settings.notificationsEnabled) {
           get().addNotification({
             type: 'success',
@@ -1080,8 +1080,8 @@ export const useGameStore = create<GameStore>()(
         // Demand and economics come from the charter* helpers in utils/routeEngine.ts.
         if (charter) {
           if (stops.length > 0) return false; // missions are point-to-point by definition
-          const baseAirport = AIRPORT_DATABASE.find((a) => a.iata === origin);
-          const missionAirport = AIRPORT_DATABASE.find((a) => a.iata === destination);
+          const baseAirport = getAirportByIata(origin);
+          const missionAirport = getAirportByIata(destination);
           if (!baseAirport || !missionAirport) return false;
           // The revenue leg plus the passenger-free return leg must both fit the airframe.
           if (assignedType && !checkLoopRange(assignedType, [baseAirport, missionAirport]).feasible) return false;
@@ -1132,7 +1132,7 @@ export const useGameStore = create<GameStore>()(
         // Resolve the full loop path: HUB → stops… → destination → back to HUB.
         const pathIatas = getRoutePath({ origin, stops, destination });
         if (new Set(pathIatas).size !== pathIatas.length) return false; // duplicate airport in the loop
-        const pathAirports = pathIatas.map((iata) => AIRPORT_DATABASE.find((a) => a.iata === iata));
+        const pathAirports = pathIatas.map((iata) => getAirportByIata(iata));
         if (pathAirports.some((a) => !a)) return false;
 
         const isMultiHop = stops.length > 0;
@@ -1441,8 +1441,8 @@ export const useGameStore = create<GameStore>()(
         const updatedRoutes = airline.routes.map((route) => {
           if (!route.isActive) return route;
 
-          const originAirport = AIRPORT_DATABASE.find((a) => a.iata === route.origin);
-          const destAirport = AIRPORT_DATABASE.find((a) => a.iata === route.destination);
+          const originAirport = getAirportByIata(route.origin);
+          const destAirport = getAirportByIata(route.destination);
           const aircraftType = findAircraftById(route.aircraftId);
           if (!originAirport || !destAirport || !aircraftType) return route;
 
