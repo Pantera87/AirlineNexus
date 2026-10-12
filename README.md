@@ -8,6 +8,16 @@ Airline Nexus is a single-player management simulation in which the player assum
 
 The game models authentic aviation operations including fuel costs, landing fees, slot restrictions, aircraft maintenance, and crew scheduling regulations. Airport data is sourced from [OurAirports](https://ourairports.com).
 
+## Screenshots
+
+| | |
+|---|---|
+| ![Welcome screen](docs/screenshots/welcome.png) | ![Airline setup](docs/screenshots/airline-setup.png) |
+| ![Dashboard](docs/screenshots/dashboard.png) | ![Fleet management](docs/screenshots/fleet.png) |
+| ![Route management](docs/screenshots/routes.png) | |
+
+Screenshots are captured automatically with Puppeteer — run `npm run screenshots` (requires `npm run build` first) to refresh `docs/screenshots/`.
+
 ## Features
 
 | Feature | Description |
@@ -122,6 +132,7 @@ The generated file is committed to source control. The CSV is not needed at runt
 | `npm run lint` | Run ESLint over `src/` |
 | `npm run test` | Run Vitest unit tests |
 | `npm run generate:airports` | Regenerate the airport database from CSV |
+| `npm run screenshots` | Capture the README screenshots with Puppeteer (requires `npm run build`) |
 
 ## Docker Deployment
 
